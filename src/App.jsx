@@ -1,3 +1,4 @@
+// v1778800475500
 import { useState, useEffect, useCallback } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, doc, collection, setDoc, getDoc, onSnapshot, writeBatch, getDocs } from "firebase/firestore";
@@ -79,7 +80,7 @@ const PICKUP_PHRASES = [
 function getPickupPhrase(){ return PICKUP_PHRASES[Math.floor(Math.random()*PICKUP_PHRASES.length)]; }
 function getPickupScore(par, strokes){ return par + strokes + 2 + 1; }
 
-function playingHcp(hcp){ return Math.min(Math.round(hcp*0.75),36); }
+function playingHcp(hcp){ if(hcp<=18) return hcp; return Math.min(Math.round(hcp*0.75),36); }
 
 function calcHandicapStrokes(playerHcp,lowestHcp,strokeIndexes,totalHoles) {
   playerHcp=playingHcp(playerHcp); lowestHcp=playingHcp(lowestHcp);
