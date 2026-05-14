@@ -119,18 +119,6 @@ const S={
   tab:(a)=>({flex:1,padding:"10px 4px",background:a?"#1a6b3c":"transparent",color:a?"#fff":"#7a9080",border:"none",borderRadius:10,fontWeight:600,fontSize:13,cursor:"pointer"}),
 };
 
-function processAlertQueue(setNotification){
-  if(!window._alertQueue||window._alertQueue.length===0){window._alertPlaying=false;return;}
-  window._alertPlaying=true;
-  const next=window._alertQueue.shift();
-  setNotification({msg:next.msg,type:next.type||"score"});
-  // dont auto dismiss - tap to dismiss, but if another alert waiting, show after 8s anyway
-  window._alertTimer=setTimeout(()=>{
-    setNotification(null);
-    setTimeout(()=>processAlertQueue(setNotification),600);
-  },8000);
-}
-
 export default function App() {
   const [ready,setReady]=useState(false);
   const [screen,setScreen]=useState("login");
@@ -159,16 +147,11 @@ export default function App() {
     init().catch(console.error);
     const u1=onSnapshot(doc(db,"tournament","current"),snap=>{
       if(snap.exists()){const d=snap.data();if(d.players)setPlayers(d.players);if(d.teams)setTeams(d.teams);if(d.course)setCourse(d.course);if(d.closestPin!==undefined)setClosestPin(d.closestPin||{});if(d.longestDrive!==undefined)setLongestDrive(d.longestDrive);
-        if(d.alertQueue&&Array.isArray(d.alertQueue)){
-          const newAlerts=d.alertQueue.filter(a=>!window._seenAlerts||!window._seenAlerts.has(a.ts));
-          if(newAlerts.length>0){
-            if(!window._seenAlerts)window._seenAlerts=new Set();
-            newAlerts.forEach(a=>window._seenAlerts.add(a.ts));
-            if(!window._alertQueue)window._alertQueue=[];
-            window._alertQueue.push(...newAlerts);
-            if(!window._alertPlaying)processAlertQueue(setNotification);
-          }
-        });
+        if(d.lastPickup&&d.lastPickup.ts&&d.lastPickup.ts!==window._lastPickupTs){
+          window._lastPickupTs=d.lastPickup.ts;
+          const isPickupAlert=d.lastPickup.playerName&&d.lastPickup.playerName!=='';
+          const msg=isPickupAlert?d.lastPickup.playerName+' en hoyo '+d.lastPickup.hole+': '+d.lastPickup.phrase:d.lastPickup.phrase;
+          setNotification({msg,type:isPickupAlert?"pickup":"score"});
         }}
     });
     const u2=onSnapshot(collection(db,"scores"),snap=>{const s={};snap.forEach(d=>{s[d.id]=d.data();});setScores(s);});
@@ -199,15 +182,7 @@ export default function App() {
     return(<div style={S.app}><Notification data={notification} onDismiss={()=>setNotification(null)}/>{syncing&&<SyncBadge/>}<div style={{padding:"1.5rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}><div><div style={S.h1}>{course.name}</div><div style={{...S.muted,display:"flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/>Live</div></div><button onClick={()=>{setCurrentPlayer(null);setScreen("login");}} style={S.btnSm("#2a4030","#7a9080")}>Logout</button></div><div style={{...S.cardGold,marginBottom:"1rem",display:"flex",gap:12,alignItems:"center"}}><Avatar player={currentPlayer} size={52}/><div><div style={{fontSize:20,fontWeight:700,color:"#e8c84a"}}>Bienvenido, {currentPlayer.name}!</div><div style={{color:"#8fa898",fontSize:14}}>{team?.name} - HCP {currentPlayer.handicap}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:"1rem"}}><StatCard label="Stableford" value={stats.stableford} unit="pts"/><StatCard label="Quota" value={(stats.quotaPos>=0?"+":"")+stats.quotaPos} unit={"de "+stats.quota}/><StatCard label="Hoyos" value={stats.holesPlayed+"/"+course.holes} unit="jugados"/><StatCard label="Gross" value={stats.holesPlayed>0?stats.totalGross:""} unit="golpes"/></div><button onClick={()=>setScreen("scorecard")} style={{...S.btn(),marginBottom:"1rem",fontSize:17,padding:16}}>⛳ Ingresar Scores</button><button onClick={()=>setScreen("leaderboard")} style={{...S.btn("#1a2e1e","#e8c84a"),marginBottom:"1rem",border:"1px solid #b8962e"}}>🏆🏆 Leaderboard en Vivo</button><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:12}}>Premios Especiales</div><SpecialAwards players={players} closestPin={closestPin} longestDrive={longestDrive} setClosestPin={cp=>{setClosestPin(cp);updateTournament({closestPin:cp});}} setLongestDrive={ld=>{setLongestDrive(ld);updateTournament({longestDrive:ld});}} currentPlayer={currentPlayer} course={course} showNotif={showNotif}/></div></div><BottomNav screen="home" setScreen={setScreen}/></div>);
   }
 
-  if(screen==="scorecard"&&currentPlayer)return <ScorecardScreen currentPlayer={currentPlayer} players={players} course={course} scores={scores} updateScore={updateScore} updateTournament={updateTournament} scoringHole={scoringHole} setScoringHole={setScoringHole} onBack={()=>setScreen("home")} showNotif={showNotif} syncing={syncing} onScoreAlert={(msg,type)=>{
-      const alert={msg,type:type||"score",ts:Date.now()};
-      if(!window._seenAlerts)window._seenAlerts=new Set();
-      window._seenAlerts.add(alert.ts);
-      if(!window._alertQueue)window._alertQueue=[];
-      window._alertQueue.unshift(alert);
-      if(!window._alertPlaying)processAlertQueue(setNotification);
-      updateTournament({alertQueue:window._currentAlertQueue?[...window._currentAlertQueue,alert]:[alert]});
-    }} />;
+  if(screen==="scorecard"&&currentPlayer)return <ScorecardScreen currentPlayer={currentPlayer} players={players} course={course} scores={scores} updateScore={updateScore} updateTournament={updateTournament} scoringHole={scoringHole} setScoringHole={setScoringHole} onBack={()=>setScreen("home")} showNotif={showNotif} syncing={syncing} onScoreAlert={(msg)=>{updateTournament({lastPickup:{playerName:'',phrase:msg,hole:0,ts:Date.now()}});setNotification({msg,type:"score"});}} />;
 
   if(screen==="leaderboard")return(<div style={S.app}><Notification data={notification} onDismiss={()=>setNotification(null)}/>{syncing&&<SyncBadge/>}<div style={{padding:"1.5rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}><div style={S.h1}>Leaderboard</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/><span style={{...S.muted,fontSize:11}}>LIVE</span><button onClick={()=>setScreen("home")} style={S.btnSm("#2a4030","#7a9080")}>Atrs</button></div></div><div style={{display:"flex",gap:8,background:"#0f1f14",borderRadius:12,padding:4,marginBottom:"1rem"}}>{["individual","teams","scorecard"].map(t=>(<button key={t} style={S.tab(activeTab===t)} onClick={()=>setActiveTab(t)}>{t==="individual"?"Individual":t==="teams"?"Equipos":"Scorecard"}</button>))}</div>{activeTab==="individual"&&<IndividualLeaderboard players={players} scores={scores} course={course} teams={teams}/>}{activeTab==="teams"&&<TeamLeaderboard teams={teams} players={players} scores={scores} course={course}/>}{activeTab==="scorecard"&&<FullScorecard players={players} scores={scores} course={course} currentPlayer={currentPlayer}/>}</div><BottomNav screen="leaderboard" setScreen={setScreen}/></div>);
 
@@ -266,227 +241,118 @@ function ScorecardScreen({currentPlayer,players,course,scores,updateScore,update
   };
   const sc=(g,par,s)=>{if(g===""||g===null||g===undefined)return"#7a9080";const n=parseInt(g)-s,d=par-n;return d>=2?"#e8c84a":d>=1?"#4ade80":d===0?"#f0ede4":"#f87171";};
   const sl=(p)=>{if(p===null)return"";if(p>=4)return"guila";if(p===3)return"Birdie";if(p===2)return"Par";if(p===1)return"Bogey";return"Sin pts";};
-  return(<div style={S.app}>{syncing&&<SyncBadge/>}<div style={{padding:"1rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}><button onClick={onBack} style={S.btnSm("#2a4030","#8fa898")}> Atrs</button><div style={{textAlign:"center"}}><div style={{fontWeight:700,color:"#e8c84a"}}>{currentPlayer.name}</div><div style={S.muted}>HCP {currentPlayer.handicap}</div></div><div style={{...S.muted,fontSize:13}}>{course.holes}H</div></div><div style={{display:"flex",gap:8,marginBottom:"0.75rem"}}>
-      <button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{flex:1,background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:10,padding:"9px 12px",color:scoringHole===0?"#2a4030":"#8fa898",fontWeight:600,fontSize:13,cursor:scoringHole===0?"default":"pointer"}}>Hoyo anterior</button>
-      <button onClick={()=>{
-        const g=myScores[scoringHole];
-        if(g!==undefined&&g!==""){const pts=calcStableford(g,par,stroke);const isPickupVal=parseInt(g)>=getPickupScore(par,stroke);if(!isPickupVal&&pts!==null&&onScoreAlert){onScoreAlert(getScorePhrase(pts,currentPlayer.name),"score");}}
-        if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa!");onBack();}
-      }} style={{flex:1,background:"#1a6b3c",border:"none",borderRadius:10,padding:"9px 12px",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>{scoringHole<course.holes-1?"Siguiente hoyo":"Terminar ronda"}</button>
+  return(<div style={S.app}>{syncing&&<SyncBadge/>}<div style={{padding:"1rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}><button onClick={onBack} style={S.btnSm("#2a4030","#8fa898")}> Atrs</button><div style={{textAlign:"center"}}><div style={{fontWeight:700,color:"#e8c84a"}}>{currentPlayer.name}</div><div style={S.muted}>HCP {currentPlayer.handicap}</div></div><div style={{...S.muted,fontSize:13}}>{course.holes}H</div></div><div style={{display:"flex",gap:8,marginBottom:10}}>
+      <button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{flex:1,background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:10,padding:"9px",color:scoringHole===0?"#2a4030":"#8fa898",fontWeight:600,fontSize:13,cursor:scoringHole===0?"default":"pointer"}}>Hoyo anterior</button>
+      <button onClick={()=>{const g=myScores[scoringHole];if(g!==undefined&&g!==""){const pts=calcStableford(g,par,stroke);const isP=parseInt(g)>=getPickupScore(par,stroke);if(!isP&&pts!==null&&onScoreAlert)onScoreAlert(getScorePhrase(pts,currentPlayer.name),"score");}if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa!");onBack();}}} style={{flex:1,background:"#1a6b3c",border:"none",borderRadius:10,padding:"9px",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>{scoringHole<course.holes-1?"Siguiente hoyo":"Terminar ronda"}</button>
     </div>
-    <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:"1rem"}}>{Array.from({length:course.holes},(_,i)=>{const g=myScores[i],played=g!==undefined&&g!=="",c=played?sc(g,course.pars[i],myStrokes[i]):"#2a4030";return(<button key={i} onClick={()=>setScoringHole(i)} style={{minWidth:36,height:36,borderRadius:8,background:scoringHole===i?"#e8c84a":"#1a2e1e",color:scoringHole===i?"#0f1f14":c,border:played?"1px solid "+c:"1px solid #2a4030",fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0}}>{i+1}</button>);})}</div><div style={{...S.cardGold,marginBottom:"1rem",textAlign:"center"}}><div style={{fontSize:13,color:"#8fa898",marginBottom:4}}>HOYO {scoringHole+1}</div><div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:8}}><div><div style={S.muted}>Par</div><div style={{fontSize:22,fontWeight:700}}>{par}</div></div><div><div style={S.muted}>SI</div><div style={{fontSize:22,fontWeight:700}}>{course.strokeIndex[scoringHole]}</div></div><div><div style={S.muted}>Golpes</div><div style={{fontSize:22,fontWeight:700,color:"#e8c84a"}}>{stroke>0?"+"+stroke:"0"}</div></div></div><div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:8}}><button onClick={()=>{const v=parseInt(cv)||par;updateScore(currentPlayer.id,scoringHole,Math.max(1,v-1));}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}></button><div style={{fontSize:56,fontWeight:800,color:sc(cv,par,stroke),minWidth:64,textAlign:"center"}}>{cv===""?"":cv}</div><button onClick={()=>{const v=parseInt(cv)||(par-1);updateScore(currentPlayer.id,scoringHole,v+1);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}>+</button></div>{sf!==null&&<div style={{background:"#0f1f14",borderRadius:8,padding:"6px 16px",display:"inline-block"}}><span style={{color:"#e8c84a",fontWeight:700}}>{sf} pts</span><span style={{color:"#8fa898",marginLeft:8,fontSize:13}}>{sl(sf)}</span></div>}
-    <button onClick={()=>{
-      const phrase=getPickupPhrase();
-      const pickupScore=getPickupScore(par,stroke);
-      updateScore(currentPlayer.id,scoringHole,pickupScore);
-      const msg=currentPlayer.name+' en hoyo '+(scoringHole+1)+': '+phrase;
-      const alert={msg,type:"pickup",ts:Date.now()};
-      if(!window._seenAlerts)window._seenAlerts=new Set();
-      window._seenAlerts.add(alert.ts);
-      if(!window._alertQueue)window._alertQueue=[];
-      window._alertQueue.unshift(alert);
-      if(!window._alertPlaying)processAlertQueue(setNotification);
-      updateTournament({alertQueue:[alert]});
-    }} style={{background:"#3d2000",color:"#fbbf24",border:"1px solid #fbbf24",borderRadius:10,padding:"10px 16px",fontWeight:700,fontSize:13,cursor:"pointer",marginTop:10,width:"100%"}}>Recoger pelota</button>
-    <div style={{display:"flex",gap:8,marginTop:12}}>{[par-1,par,par+1,par+2].map(v=>(<button key={v} onClick={()=>updateScore(currentPlayer.id,scoringHole,v)} style={{flex:1,padding:"10px 4px",borderRadius:8,background:parseInt(cv)===v?"#1a6b3c":"#1a2e1e",border:"1px solid #2a4030",color:parseInt(cv)===v?"#fff":"#8fa898",fontWeight:600,fontSize:14,cursor:"pointer"}}>{v}</button>))}</div></div><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:8}}>Mi Ronda</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{[{l:"Gross",v:stats.totalGross||""},{l:"SF",v:stats.stableford+"pts"},{l:"Quota",v:(stats.quotaPos>=0?"+":"")+stats.quotaPos}].map(({l,v})=>(<div key={l} style={{background:"#0f1f14",borderRadius:8,padding:8,textAlign:"center"}}><div style={{...S.muted,fontSize:11}}>{l}</div><div style={{fontWeight:700,fontSize:15,color:"#e8c84a"}}>{v}</div></div>))}</div></div><div style={{...S.h3,marginBottom:8}}>Otros</div>{players.filter(p=>p.id!==currentPlayer.id).map(p=>{const ps=scores[p.id]||{},ps2=calcHandicapStrokes(p.handicap,lowestHcp,course.strokeIndex,course.holes),g=ps[scoringHole],psf=calcStableford(g,course.pars[scoringHole],ps2[scoringHole]);return(<div key={p.id} style={{...S.card,marginBottom:8,display:"flex",alignItems:"center",gap:12,opacity:0.8}}><Avatar player={p} size={36}/><div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{p.name}</div><div style={S.muted}> Solo lectura</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:18,color:g?sc(g,course.pars[scoringHole],ps2[scoringHole]):"#2a4030"}}>{g||""}</div>{psf!==null&&<div style={{fontSize:12,color:"#8fa898"}}>{psf}pts</div>}</div></div>);})}<div style={{display:"flex",gap:8,marginTop:"1rem"}}><button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{...S.btn("#1a2e1e","#8fa898"),flex:1}}> Anterior</button><button onClick={()=>{
-      const g=myScores[scoringHole];
-      if(g!==undefined&&g!==""){
-        const pts=calcStableford(g,par,stroke);
-        const isPickupVal=parseInt(g)>=getPickupScore(par,stroke);
-        if(!isPickupVal&&pts!==null&&onScoreAlert){
-          onScoreAlert(getScorePhrase(pts,currentPlayer.name),"score");
-        }
-      }
-      if(scoringHole<course.holes-1)setScoringHole(h=>h+1);
-      else{showNotif("Ronda completa! ");onBack();}
-    }} style={{...S.btn(),flex:1}}>{scoringHole<course.holes-1?"Siguiente ":"Terminar "}</button></div></div></div>);
+    <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:"1rem"}}>{Array.from({length:course.holes},(_,i)=>{const g=myScores[i],played=g!==undefined&&g!=="",c=played?sc(g,course.pars[i],myStrokes[i]):"#2a4030";return(<button key={i} onClick={()=>setScoringHole(i)} style={{minWidth:36,height:36,borderRadius:8,background:scoringHole===i?"#e8c84a":"#1a2e1e",color:scoringHole===i?"#0f1f14":c,border:played?"1px solid "+c:"1px solid #2a4030",fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0}}>{i+1}</button>);})}</div><div style={{...S.cardGold,marginBottom:"1rem",textAlign:"center"}}><div style={{fontSize:13,color:"#8fa898",marginBottom:4}}>HOYO {scoringHole+1}</div><div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:8}}><div><div style={S.muted}>Par</div><div style={{fontSize:22,fontWeight:700}}>{par}</div></div><div><div style={S.muted}>SI</div><div style={{fontSize:22,fontWeight:700}}>{course.strokeIndex[scoringHole]}</div></div><div><div style={S.muted}>Golpes</div><div style={{fontSize:22,fontWeight:700,color:"#e8c84a"}}>{stroke>0?"+"+stroke:"0"}</div></div></div><div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:8}}><button onClick={()=>{const v=parseInt(cv)||par;const ns=Math.max(1,v-1);updateScore(currentPlayer.id,scoringHole,ns);fireScorePhrase(ns,scoringHole);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}></button><div style={{fontSize:56,fontWeight:800,color:sc(cv,par,stroke),minWidth:64,textAlign:"center"}}>{cv===""?"":cv}</div><button onClick={()=>{const v=parseInt(cv)||(par-1);const ns=v+1;updateScore(currentPlayer.id,scoringHole,ns);fireScorePhrase(ns,scoringHole);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}>+</button></div>{sf!==null&&<div style={{background:"#0f1f14",borderRadius:8,padding:"6px 16px",display:"inline-block"}}><span style={{color:"#e8c84a",fontWeight:700}}>{sf} pts</span><span style={{color:"#8fa898",marginLeft:8,fontSize:13}}>{sl(sf)}</span></div>}
+    <button onClick={()=>{const phrase=getPickupPhrase();const pickupScore=getPickupScore(par,stroke);updateScore(currentPlayer.id,scoringHole,pickupScore);updateTournament({lastPickup:{playerName:currentPlayer.name,phrase,hole:scoringHole+1,ts:Date.now()}});setNotification({msg:currentPlayer.name+' en hoyo '+(scoringHole+1)+': '+phrase,type:"pickup"});}} style={{background:"#3d2000",color:"#fbbf24",border:"1px solid #fbbf24",borderRadius:10,padding:"10px 16px",fontWeight:700,fontSize:13,cursor:"pointer",marginTop:10,width:"100%"}}>Recoger pelota</button>
+    <div style={{display:"flex",gap:8,marginTop:12}}>{[par-1,par,par+1,par+2].map(v=>(<button key={v} onClick={()=>{updateScore(currentPlayer.id,scoringHole,v);fireScorePhrase(v,scoringHole);}} style={{flex:1,padding:"10px 4px",borderRadius:8,background:parseInt(cv)===v?"#1a6b3c":"#1a2e1e",border:"1px solid #2a4030",color:parseInt(cv)===v?"#fff":"#8fa898",fontWeight:600,fontSize:14,cursor:"pointer"}}>{v}</button>))}</div></div><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:8}}>Mi Ronda</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{[{l:"Gross",v:stats.totalGross||""},{l:"SF",v:stats.stableford+"pts"},{l:"Quota",v:(stats.quotaPos>=0?"+":"")+stats.quotaPos}].map(({l,v})=>(<div key={l} style={{background:"#0f1f14",borderRadius:8,padding:8,textAlign:"center"}}><div style={{...S.muted,fontSize:11}}>{l}</div><div style={{fontWeight:700,fontSize:15,color:"#e8c84a"}}>{v}</div></div>))}</div></div><div style={{...S.h3,marginBottom:8}}>Otros</div>{players.filter(p=>p.id!==currentPlayer.id).map(p=>{const ps=scores[p.id]||{},ps2=calcHandicapStrokes(p.handicap,lowestHcp,course.strokeIndex,course.holes),g=ps[scoringHole],psf=calcStableford(g,course.pars[scoringHole],ps2[scoringHole]);return(<div key={p.id} style={{...S.card,marginBottom:8,display:"flex",alignItems:"center",gap:12,opacity:0.8}}><Avatar player={p} size={36}/><div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{p.name}</div><div style={S.muted}> Solo lectura</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:18,color:g?sc(g,course.pars[scoringHole],ps2[scoringHole]):"#2a4030"}}>{g||""}</div>{psf!==null&&<div style={{fontSize:12,color:"#8fa898"}}>{psf}pts</div>}</div></div>);})}<div style={{display:"flex",gap:8,marginTop:"1rem"}}><button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{...S.btn("#1a2e1e","#8fa898"),flex:1}}> Anterior</button><button onClick={()=>{if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa! ");onBack();}}} style={{...S.btn(),flex:1}}>{scoringHole<course.holes-1?"Siguiente ":"Terminar "}</button></div></div></div>);
 }
 
 
-// ── PERSONALITY ENGINE ────────────────────────────────────────────────────────
-
-function getHoleScores(player, scores, course, allPlayers) {
-  const lowestHcp = allPlayers?.length ? Math.min(...allPlayers.map(p=>p.handicap)) : player.handicap;
-  const strokes = calcHandicapStrokes(player.handicap, lowestHcp, course.strokeIndex, course.holes);
-  const ps = scores[player.id] || {};
-  const holes = [];
-  for (let h = 0; h < course.holes; h++) {
-    const g = ps[h];
-    if (g !== undefined && g !== '') {
-      const sf = calcStableford(g, course.pars[h], strokes[h]);
-      const netDiff = parseInt(g) - strokes[h] - course.pars[h];
-      holes.push({ hole: h, gross: parseInt(g), par: course.pars[h], strokes: strokes[h], sf, netDiff });
-    }
-  }
+function getHoleScores(player,scores,course,allPlayers){
+  const lowestHcp=allPlayers?.length?Math.min(...allPlayers.map(p=>p.handicap)):player.handicap;
+  const strokes=calcHandicapStrokes(player.handicap,lowestHcp,course.strokeIndex,course.holes);
+  const ps=scores[player.id]||{};const holes=[];
+  for(let h=0;h<course.holes;h++){const g=ps[h];if(g!==undefined&&g!==''){const sf=calcStableford(g,course.pars[h],strokes[h]);const netDiff=parseInt(g)-strokes[h]-course.pars[h];holes.push({hole:h,gross:parseInt(g),par:course.pars[h],strokes:strokes[h],sf,netDiff});}}
   return holes;
 }
-
-function getMorale(holes) {
-  if (!holes.length) return { label: 'Calm', level: 0, color: '#6b7280' };
-  const recent = holes.slice(-3);
-  const recentSF = recent.reduce((s,h)=>s+(h.sf||0),0);
-  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
-  const avgSF = totalSF / holes.length;
-  const badRun = recent.filter(h=>h.sf===0).length;
-  const lastSF = holes[holes.length-1]?.sf || 0;
-
-  if (badRun >= 3) return { label: 'Beyond Analytics', level: 6, color: '#7f1d1d' };
-  if (badRun >= 2 && lastSF === 0) return { label: 'Spiraling', level: 5, color: '#991b1b' };
-  if (badRun >= 2) return { label: 'Critical', level: 4, color: '#b91c1c' };
-  if (avgSF < 1.2 && holes.length > 3) return { label: 'Silent', level: 3, color: '#92400e' };
-  if (avgSF < 1.5 && holes.length > 2) return { label: 'Unstable', level: 2, color: '#b45309' };
-  if (recentSF < 3 && holes.length > 2) return { label: 'Irritated', level: 1, color: '#d97706' };
-  if (avgSF >= 2.5) return { label: 'Focused', level: -1, color: '#059669' };
-  return { label: 'Stable', level: 0, color: '#6b7280' };
+function getMorale(holes){
+  if(!holes.length)return{label:'Calm',level:0,color:'#6b7280'};
+  const recent=holes.slice(-3);const recentSF=recent.reduce((s,h)=>s+(h.sf||0),0);
+  const totalSF=holes.reduce((s,h)=>s+(h.sf||0),0);const avgSF=totalSF/holes.length;
+  const badRun=recent.filter(h=>h.sf===0).length;const lastSF=holes[holes.length-1]?.sf||0;
+  if(badRun>=3)return{label:'Beyond Analytics',level:6,color:'#7f1d1d'};
+  if(badRun>=2&&lastSF===0)return{label:'Spiraling',level:5,color:'#991b1b'};
+  if(badRun>=2)return{label:'Critical',level:4,color:'#b91c1c'};
+  if(avgSF<1.2&&holes.length>3)return{label:'Silent',level:3,color:'#92400e'};
+  if(avgSF<1.5&&holes.length>2)return{label:'Unstable',level:2,color:'#b45309'};
+  if(recentSF<3&&holes.length>2)return{label:'Irritated',level:1,color:'#d97706'};
+  if(avgSF>=2.5)return{label:'Focused',level:-1,color:'#059669'};
+  return{label:'Stable',level:0,color:'#6b7280'};
 }
-
-function getStatus(holes) {
-  if (!holes.length) return 'Warming Up';
-  const recent = holes.slice(-3);
-  const last = holes[holes.length - 1];
-  const recentSF = recent.reduce((s,h)=>s+(h.sf||0),0);
-  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
-  const avgSF = totalSF / holes.length;
-  const streak0 = holes.slice().reverse().findIndex(h=>h.sf>0);
-  const streakGood = holes.slice().reverse().findIndex(h=>h.sf<2);
-
-  if (streak0 >= 3) return 'Mentally Offline';
-  if (streak0 >= 2) return 'Fighting Demons';
-  if (streak0 === 1 && last.sf === 0) return 'Round Deteriorating';
-  if (streakGood < 0 && holes.length > 2) return 'Unexpected Momentum';
-  if (recentSF >= 7) return 'Dangerously Hopeful';
-  if (recentSF >= 5) return 'Unexpected Momentum';
-  if (avgSF < 1 && holes.length > 3) return 'Emotionally Unavailable';
-  if (avgSF < 1.3 && holes.length > 3) return 'Searching for Answers';
-  if (last.sf >= 3) return 'Holding It Together';
-  if (holes.length >= 7 && avgSF < 1.5) return 'One Hole From Collapse';
-  if (holes.length >= 5 && recentSF < 3) return 'Under Pressure';
-  return 'Stable';
+function getStatus(holes){
+  if(!holes.length)return'Warming Up';
+  const last=holes[holes.length-1];const totalSF=holes.reduce((s,h)=>s+(h.sf||0),0);const avgSF=totalSF/holes.length;
+  const recent=holes.slice(-3);const recentSF=recent.reduce((s,h)=>s+(h.sf||0),0);
+  let s0=0;for(let i=holes.length-1;i>=0;i--){if(holes[i].sf===0)s0++;else break;}
+  let sG=0;for(let i=holes.length-1;i>=0;i--){if(holes[i].sf>=2)sG++;else break;}
+  if(s0>=3)return'Mentally Offline';
+  if(s0>=2)return'Fighting Demons';
+  if(s0===1&&last.sf===0)return'Round Deteriorating';
+  if(sG>=3)return'Dangerously Hopeful';
+  if(sG>=2)return'Unexpected Momentum';
+  if(avgSF<1&&holes.length>3)return'Emotionally Unavailable';
+  if(avgSF<1.3&&holes.length>3)return'Searching for Answers';
+  if(last.sf>=3)return'Holding It Together';
+  if(holes.length>=7&&avgSF<1.5)return'One Hole From Collapse';
+  if(holes.length>=5&&recentSF<3)return'Under Pressure';
+  return'Stable';
 }
-
-function getCommentary(holes, playerName, rank, totalPlayers) {
-  if (!holes.length) return null;
-  const last = holes[holes.length - 1];
-  const prev = holes[holes.length - 2];
-  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
-  const avgSF = totalSF / holes.length;
-  const streak0 = () => { let c=0; for(let i=holes.length-1;i>=0;i--){ if(holes[i].sf===0)c++; else break; } return c; };
-  const streakGood = () => { let c=0; for(let i=holes.length-1;i>=0;i--){ if(holes[i].sf>=2)c++; else break; } return c; };
-  const s0 = streak0(), sG = streakGood();
-  const isLast = rank === totalPlayers;
-  const isFirst = rank === 1;
-  const holesLeft = holes.length;
-
-  // Eagle
-  if (last.sf >= 4) return 'An exceptional outcome. The group adjusts its expectations accordingly.';
-  // Birdie after bad run
-  if (last.sf === 3 && s0 === 0 && prev?.sf === 0) return 'A response. Whether it changes anything remains to be seen.';
-  // Birdie streak
-  if (sG >= 3 && holes[holes.length-3]?.sf >= 3) return 'Temporary Professional Golfer mode engaged.';
-  // Birdie
-  if (last.sf === 3) return 'Progress noted. The round continues to be monitored.';
-  // Triple bogey or worse
-  if (last.netDiff >= 3) return 'Round integrity compromised.';
-  // Double bogey
-  if (last.netDiff === 2) return 'An ambitious decision that did not conclude as planned.';
-  // Consecutive zeros
-  if (s0 >= 3) return 'The situation continues to develop.';
-  if (s0 >= 2) return 'Momentum unavailable at this time.';
-  // Moving to last
-  if (isLast && holesLeft > 3) return 'The leaderboard reflects recent events.';
-  // Losing lead
-  if (!isFirst && prev && totalSF < 3 && holesLeft > 4) return 'Hope lasted approximately two holes.';
-  // Late round pressure
-  if (holesLeft >= 7 && avgSF < 1.5) return 'A difficult stretch for the player.';
-  // Collapse on final holes
-  if (holesLeft >= 7 && last.sf === 0) return 'Late round panic setting in.';
-  // Generic bad
-  if (last.sf === 0) return 'Confidence declining steadily.';
-  // Generic ok
-  if (last.sf === 2) return 'Stability maintained. For now.';
-  // Generic good start going bad
-  if (holesLeft > 5 && avgSF > 2 && last.sf === 0) return 'This round has entered a new phase.';
+function getCommentary(holes,rank,total){
+  if(!holes.length)return null;
+  const last=holes[holes.length-1];const prev=holes[holes.length-2];
+  const totalSF=holes.reduce((s,h)=>s+(h.sf||0),0);const avgSF=totalSF/holes.length;
+  const n=holes.length;const isLast=rank===total;
+  let s0=0;for(let i=holes.length-1;i>=0;i--){if(holes[i].sf===0)s0++;else break;}
+  let sG=0;for(let i=holes.length-1;i>=0;i--){if(holes[i].sf>=2)sG++;else break;}
+  if(last.sf>=4)return'An exceptional outcome. The group adjusts its expectations accordingly.';
+  if(last.sf===3&&prev?.sf===0)return'A response. Whether it changes anything remains to be seen.';
+  if(sG>=3)return'Temporary Professional Golfer mode engaged.';
+  if(last.sf===3)return'Progress noted. The round continues to be monitored.';
+  if(last.netDiff>=3)return'Round integrity compromised.';
+  if(last.netDiff===2)return'An ambitious decision that did not conclude as planned.';
+  if(s0>=3)return'The situation continues to develop.';
+  if(s0>=2)return'Momentum unavailable at this time.';
+  if(isLast&&n>3)return'The leaderboard reflects recent events.';
+  if(n>=7&&avgSF<1.5&&last.sf===0)return'Late round panic setting in.';
+  if(n>=7&&avgSF<1.5)return'A difficult stretch for the player.';
+  if(last.sf===0)return'Confidence declining steadily.';
+  if(last.sf===2)return'Stability maintained. For now.';
+  if(n>5&&avgSF>2&&last.sf===0)return'This round has entered a new phase.';
   return null;
 }
-
-function getAchievements(holes) {
-  if (holes.length < 2) return [];
-  const achievements = [];
-  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
-  const avgSF = totalSF/holes.length;
-  const front = holes.slice(0,Math.min(5,holes.length));
-  const back = holes.slice(Math.max(0,holes.length-4));
-  const frontAvg = front.reduce((s,h)=>s+(h.sf||0),0)/front.length;
-  const backAvg = back.reduce((s,h)=>s+(h.sf||0),0)/back.length;
-
-  // Collapse
-  const s0 = () => { let c=0; for(let i=holes.length-1;i>=0;i--){ if(holes[i].sf===0)c++; else break; } return c; };
-  if (s0() >= 3) achievements.push('Public Meltdown');
-  // Back from dead
-  for (let i=1;i<holes.length;i++) {
-    if (holes[i-1].netDiff>=3 && holes[i].sf>=3) { achievements.push('Back From the Dead'); break; }
-  }
-  // Hope was a mistake
-  if (holes.length >= 7 && frontAvg >= 2.2 && backAvg < 1.2) achievements.push('Hope Was a Mistake');
-  // Temporary Professional
-  const consGood = holes.reduce((max,_,i)=>{ let c=0;for(let j=i;j<holes.length;j++){if(holes[j].sf>=2)c++;else break;} return Math.max(max,c); },0);
-  if (consGood >= 3) achievements.push('Temporary Professional Golfer');
-  // Character development
-  const earlyBad = holes.slice(0,3).every(h=>h.sf<=1);
-  const latGood = holes.slice(-3).every(h=>h.sf>=2);
-  if (earlyBad && latGood && holes.length>=6) achievements.push('Character Development');
-  // Not technically giving up
-  if (holes.some(h=>h.netDiff>=3) && totalSF > 5) achievements.push('Not Technically Giving Up');
-  // Still mathematically alive
-  if (avgSF < 1.2 && holes.length >= 5 && totalSF > 0) achievements.push('Still Mathematically Alive');
-  // Against all evidence
-  if (holes.length >= 6 && avgSF < 1.5 && holes[holes.length-1].sf >= 3) achievements.push('Against All Evidence');
-  // Strong start difficult finish
-  if (holes.length >= 8 && frontAvg > 2 && backAvg < 1) achievements.push('Strong Start, Difficult Finish');
-  // The rebuild
-  const consBad = holes.reduce((max,_,i)=>{ let c=0;for(let j=i;j<holes.length;j++){if(holes[j].sf===0)c++;else break;} return Math.max(max,c); },0);
-  if (consBad >= 2 && holes[holes.length-1].sf >= 2) achievements.push('The Rebuild');
-
-  return [...new Set(achievements)];
+function getAchievements(holes){
+  if(holes.length<2)return[];const achievements=[];
+  const totalSF=holes.reduce((s,h)=>s+(h.sf||0),0);const avgSF=totalSF/holes.length;
+  const front=holes.slice(0,Math.min(5,holes.length));const back=holes.slice(Math.max(0,holes.length-4));
+  const frontAvg=front.reduce((s,h)=>s+(h.sf||0),0)/front.length;
+  const backAvg=back.length?back.reduce((s,h)=>s+(h.sf||0),0)/back.length:null;
+  let s0=0;for(let i=holes.length-1;i>=0;i--){if(holes[i].sf===0)s0++;else break;}
+  if(s0>=3)achievements.push('Public Meltdown');
+  for(let i=1;i<holes.length;i++){if(holes[i-1].netDiff>=3&&holes[i].sf>=3){achievements.push('Back From the Dead');break;}}
+  if(holes.length>=7&&frontAvg>=2.2&&backAvg!==null&&backAvg<1.2)achievements.push('Hope Was a Mistake');
+  const consGood=holes.reduce((max,_,i)=>{let cc=0;for(let j=i;j<holes.length;j++){if(holes[j].sf>=2)cc++;else break;}return Math.max(max,cc);},0);
+  if(consGood>=3)achievements.push('Temporary Professional Golfer');
+  if(holes.slice(0,3).every(h=>h.sf<=1)&&holes.slice(-3).every(h=>h.sf>=2)&&holes.length>=6)achievements.push('Character Development');
+  if(holes.some(h=>h.netDiff>=3)&&totalSF>5)achievements.push('Not Technically Giving Up');
+  if(avgSF<1.2&&holes.length>=5&&totalSF>0)achievements.push('Still Mathematically Alive');
+  if(holes.length>=6&&avgSF<1.5&&holes[holes.length-1].sf>=3)achievements.push('Against All Evidence');
+  if(holes.length>=8&&frontAvg>2&&backAvg!==null&&backAvg<1)achievements.push('Strong Start, Difficult Finish');
+  const consBad=holes.reduce((max,_,i)=>{let cc=0;for(let j=i;j<holes.length;j++){if(holes[j].sf===0)cc++;else break;}return Math.max(max,cc);},0);
+  if(consBad>=2&&holes[holes.length-1].sf>=2)achievements.push('The Rebuild');
+  return[...new Set(achievements)];
 }
-
-function getSideRankings(players, scores, course, allPlayers) {
-  const data = players.map(p => {
-    const holes = getHoleScores(p, scores, course, allPlayers);
-    if (!holes.length) return null;
-    const sfs = holes.map(h=>h.sf||0);
-    const diffs = sfs.slice(1).map((s,i)=>Math.abs(s-sfs[i]));
-    const volatility = diffs.reduce((a,b)=>a+b,0);
-    const consBad = holes.reduce((max,_,i)=>{ let c=0;for(let j=i;j<holes.length;j++){if(holes[j].sf===0)c++;else break;} return Math.max(max,c); },0);
-    const front = holes.slice(0,Math.min(5,holes.length));
-    const back = holes.slice(Math.max(0,holes.length-4));
-    const frontAvg = front.reduce((s,h)=>s+(h.sf||0),0)/front.length;
-    const backAvg = back.length ? back.reduce((s,h)=>s+(h.sf||0),0)/back.length : null;
-    const worstStreak = consBad;
-    const bestRecovery = () => { for(let i=1;i<holes.length;i++){ if(holes[i-1].netDiff>=2&&holes[i].sf>=3) return true; } return false; };
-    return { p, holes, volatility, consBad, frontAvg, backAvg, worstStreak, bestRecovery: bestRecovery() };
+function getSideRankings(players,scores,course){
+  const data=players.map(p=>{
+    const holes=getHoleScores(p,scores,course,players);if(!holes.length)return null;
+    const sfs=holes.map(h=>h.sf||0);const diffs=sfs.slice(1).map((s,i)=>Math.abs(s-sfs[i]));
+    const volatility=diffs.reduce((a,b)=>a+b,0);
+    const consBad=holes.reduce((max,_,i)=>{let cc=0;for(let j=i;j<holes.length;j++){if(holes[j].sf===0)cc++;else break;}return Math.max(max,cc);},0);
+    const front=holes.slice(0,Math.min(5,holes.length));const back=holes.slice(Math.max(0,holes.length-4));
+    const frontAvg=front.reduce((s,h)=>s+(h.sf||0),0)/front.length;
+    const backAvg=back.length?back.reduce((s,h)=>s+(h.sf||0),0)/back.length:null;
+    const bestRecovery=holes.some((_,i)=>i>0&&holes[i-1].netDiff>=2&&holes[i].sf>=3);
+    return{p,holes,volatility,consBad,frontAvg,backAvg,bestRecovery};
   }).filter(Boolean);
-
-  if (!data.length) return [];
-  const rankings = [];
-  const byVolatility = [...data].sort((a,b)=>b.volatility-a.volatility);
-  if (byVolatility[0]) rankings.push({ label: 'Most Volatile Round', player: byVolatility[0].p.name });
-  const bestRec = data.filter(d=>d.bestRecovery);
-  if (bestRec.length) rankings.push({ label: 'Best Recovery', player: bestRec[0].p.name });
-  const byCollapseSpeed = [...data].sort((a,b)=>b.consBad-a.consBad);
-  if (byCollapseSpeed[0]?.consBad >= 2) rankings.push({ label: 'Fastest Collapse', player: byCollapseSpeed[0].p.name });
-  const byDamage = [...data].sort((a,b)=>b.worstStreak-a.worstStreak);
-  if (byDamage[0]?.worstStreak >= 2) rankings.push({ label: 'Most Consecutive Damage', player: byDamage[0].p.name });
-  const strongStart = [...data].filter(d=>d.frontAvg>2&&d.backAvg!==null&&d.backAvg<1.5).sort((a,b)=>(b.frontAvg-b.backAvg)-(a.frontAvg-a.backAvg));
-  if (strongStart[0]) rankings.push({ label: 'Strong Start, Difficult Finish', player: strongStart[0].p.name });
-  const latePanic = [...data].filter(d=>d.backAvg!==null&&d.backAvg<1&&d.frontAvg>=1.5);
-  if (latePanic.length) rankings.push({ label: 'Late Round Panic', player: latePanic[0].p.name });
-  const tempGreat = data.filter(d=>{ const c=d.holes.reduce((max,_,i)=>{ let cc=0;for(let j=i;j<d.holes.length;j++){if(d.holes[j].sf>=3)cc++;else break;} return Math.max(max,cc); },0); return c>=2; });
-  if (tempGreat.length) rankings.push({ label: 'Temporary Greatness', player: tempGreat[0].p.name });
-  const mostExpensive = [...data].sort((a,b)=>b.volatility-a.volatility);
-  if (mostExpensive[0]) rankings.push({ label: 'Most Emotionally Expensive Round', player: mostExpensive[0].p.name });
-
-  return rankings;
+  if(!data.length)return[];const r=[];
+  const byVol=[...data].sort((a,b)=>b.volatility-a.volatility);if(byVol[0]?.volatility>2)r.push({label:'Most Volatile Round',player:byVol[0].p.name});
+  const bestRec=data.filter(d=>d.bestRecovery);if(bestRec.length)r.push({label:'Best Recovery',player:bestRec[0].p.name});
+  const byBad=[...data].sort((a,b)=>b.consBad-a.consBad);if(byBad[0]?.consBad>=2)r.push({label:'Fastest Collapse',player:byBad[0].p.name});
+  const ss=data.filter(d=>d.frontAvg>2&&d.backAvg!==null&&d.backAvg<1.5).sort((a,b)=>(b.frontAvg-b.backAvg)-(a.frontAvg-a.backAvg));if(ss[0])r.push({label:'Strong Start, Difficult Finish',player:ss[0].p.name});
+  const lp=data.filter(d=>d.backAvg!==null&&d.backAvg<1&&d.frontAvg>=1.5);if(lp.length)r.push({label:'Late Round Panic',player:lp[0].p.name});
+  return r;
 }
 
 function IndividualLeaderboard({players,scores,course,teams}){
@@ -498,52 +364,52 @@ function IndividualLeaderboard({players,scores,course,teams}){
     const achievements=getAchievements(holes);
     return{...p,...s,team:teams.find(t=>t.members.includes(p.id)),holes,morale,status,achievements};
   }).sort((a,b)=>b.quotaPos-a.quotaPos);
-  const sideRankings=getSideRankings(players,scores,course);
+  const side=getSideRankings(players,scores,course);
   return(
     <div>
       {ranked.map((p,i)=>{
         const commentary=getCommentary(p.holes,i+1,players.length);
         return(
-        <div key={p.id} style={{...S.card,marginBottom:10,borderLeft:i===0?"3px solid #e8c84a":"1px solid #2a4030"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{fontSize:16,fontWeight:800,color:i===0?"#e8c84a":i===1?"#9ca3af":i===2?"#92400e":"#374151",minWidth:26,textAlign:"center"}}>{i+1}</div>
-            <Avatar player={p} size={34}/>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                <span style={{fontWeight:700,fontSize:14}}>{p.name}</span>
-                <span style={{fontSize:9,color:p.morale.color,background:p.morale.color+'15',padding:"1px 6px",borderRadius:20,fontWeight:600,letterSpacing:0.4,whiteSpace:"nowrap"}}>{p.status}</span>
+          <div key={p.id} style={{...S.card,marginBottom:10,borderLeft:i===0?"3px solid #e8c84a":"1px solid #2a4030"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{fontSize:16,fontWeight:800,color:i===0?"#e8c84a":i===1?"#9ca3af":i===2?"#92400e":"#374151",minWidth:24,textAlign:"center"}}>{i+1}</div>
+              <Avatar player={p} size={34}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,fontSize:14}}>{p.name}</span>
+                  <span style={{fontSize:9,color:p.morale.color,background:p.morale.color+'18',padding:"1px 6px",borderRadius:20,fontWeight:600,letterSpacing:0.3,whiteSpace:"nowrap"}}>{p.status}</span>
+                </div>
+                <div style={{fontSize:11,color:"#4a6050"}}>{p.team?.name} - HCP {p.handicap}</div>
               </div>
-              <div style={{fontSize:11,color:"#4a6050"}}>{p.team?.name} - HCP {p.handicap}</div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontWeight:800,fontSize:17,color:p.quotaPos>0?"#4ade80":p.quotaPos<0?"#f87171":"#f0ede4"}}>{p.holesPlayed>0?(p.quotaPos>=0?"+":"")+p.quotaPos:"-"}</div>
+                <div style={{fontSize:11,color:"#4a6050"}}>{p.stableford}pts</div>
+              </div>
             </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontWeight:800,fontSize:17,color:p.quotaPos>0?"#4ade80":p.quotaPos<0?"#f87171":"#f0ede4"}}>{p.holesPlayed>0?(p.quotaPos>=0?"+":"")+p.quotaPos:"-"}</div>
-              <div style={{fontSize:11,color:"#4a6050"}}>{p.stableford}pts</div>
-            </div>
+            {p.holes.length>0&&(
+              <div style={{marginTop:7,paddingTop:7,borderTop:"1px solid #0f1f14"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{fontSize:9,color:"#374151",textTransform:"uppercase",letterSpacing:1}}>Morale</span>
+                  <span style={{fontSize:9,color:p.morale.color,fontWeight:600}}>{p.morale.label}</span>
+                </div>
+                <div style={{height:2,background:"#0f1f14",borderRadius:1}}>
+                  <div style={{height:"100%",width:Math.max(4,100-Math.max(0,p.morale.level)*16)+'%',background:p.morale.color,borderRadius:1,transition:"width 1s"}}/>
+                </div>
+              </div>
+            )}
+            {commentary&&<div style={{marginTop:6,fontSize:11,color:"#374151",fontStyle:"italic",lineHeight:1.5}}>{commentary}</div>}
+            {p.achievements.length>0&&(
+              <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:3}}>
+                {p.achievements.map(a=><span key={a} style={{fontSize:9,color:"#4a6050",background:"#0f1f14",padding:"2px 7px",borderRadius:10,border:"1px solid #1a2e1e"}}>{a}</span>)}
+              </div>
+            )}
           </div>
-          {p.holes.length>0&&(
-            <div style={{marginTop:7,paddingTop:7,borderTop:"1px solid #0f1f14"}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
-                <span style={{fontSize:9,color:"#374151",textTransform:"uppercase",letterSpacing:1}}>Morale</span>
-                <span style={{fontSize:9,color:p.morale.color,fontWeight:600}}>{p.morale.label}</span>
-              </div>
-              <div style={{height:2,background:"#0f1f14",borderRadius:1}}>
-                <div style={{height:"100%",width:Math.max(4,100-Math.max(0,p.morale.level)*16)+'%',background:p.morale.color,borderRadius:1,transition:"width 1s ease"}}/>
-              </div>
-            </div>
-          )}
-          {commentary&&<div style={{marginTop:6,fontSize:11,color:"#374151",fontStyle:"italic",lineHeight:1.5}}>{commentary}</div>}
-          {p.achievements.length>0&&(
-            <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:3}}>
-              {p.achievements.map(a=><span key={a} style={{fontSize:9,color:"#4a6050",background:"#0f1f14",padding:"2px 7px",borderRadius:10,border:"1px solid #1a2e1e",letterSpacing:0.3}}>{a}</span>)}
-            </div>
-          )}
-        </div>
         );
       })}
-      {sideRankings.length>0&&(
-        <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid #1a2e1e"}}>
+      {side.length>0&&(
+        <div style={{marginTop:16,paddingTop:12,borderTop:"1px solid #1a2e1e"}}>
           <div style={{fontSize:9,color:"#374151",textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>Analysis</div>
-          {sideRankings.map((r,i)=>(
+          {side.map((r,i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #0f1f14"}}>
               <span style={{fontSize:11,color:"#374151"}}>{r.label}</span>
               <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{r.player}</span>
@@ -551,7 +417,7 @@ function IndividualLeaderboard({players,scores,course,teams}){
           ))}
         </div>
       )}
-      <div style={{fontSize:10,color:"#374151",textAlign:"center",marginTop:12,letterSpacing:0.5}}>Ordenado por cuota</div>
+      <div style={{fontSize:10,color:"#374151",textAlign:"center",marginTop:12}}>Ordenado por cuota</div>
     </div>
   );
 }
@@ -574,4 +440,4 @@ function SpecialAwards({players,closestPin,longestDrive,setClosestPin,setLongest
 function Avatar({player,size=40}){return(<div style={{width:size,height:size,borderRadius:"50%",background:player.color||"#1a6b3c",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:size*0.35,color:"#fff",flexShrink:0}}>{player.initials||player.name?.slice(0,2).toUpperCase()}</div>);}
 function StatCard({label,value,unit}){return(<div style={{background:"#1a2e1e",borderRadius:12,padding:"14px 12px",textAlign:"center",border:"1px solid #2a4030"}}><div style={{...S.muted,fontSize:11,marginBottom:4}}>{label}</div><div style={{fontSize:22,fontWeight:800,color:"#e8c84a"}}>{value}</div>{unit&&<div style={{...S.muted,fontSize:11}}>{unit}</div>}</div>);}
 function BottomNav({screen,setScreen}){return(<div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a1a0d",borderTop:"1px solid #2a4030",display:"flex",padding:"8px 0 12px",zIndex:100}}>{[{id:"home",icon:"",label:"Inicio"},{id:"scorecard",icon:"⛳",label:"Score"},{id:"leaderboard",icon:"🏆🏆",label:"Board"}].map(it=>(<button key={it.id} onClick={()=>setScreen(it.id)} style={{flex:1,background:"none",border:"none",color:screen===it.id?"#e8c84a":"#4a6050",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><div style={{fontSize:20}}>{it.icon}</div><div style={{fontSize:11,fontWeight:600}}>{it.label}</div></button>))}</div>);}
-function Notification({data,onDismiss}){if(!data)return null;const isAlert=data.type==="pickup"||data.type==="score";const bg=data.type==="error"?"#4a1a1a":isAlert?"#1a1a00":"#1a3d2a";const col=data.type==="error"?"#f87171":isAlert?"#fbbf24":"#4ade80";const bor=data.type==="error"?"#f87171":isAlert?"#fbbf24":"#4ade80";const handleDismiss=()=>{if(window._alertTimer){clearTimeout(window._alertTimer);window._alertTimer=null;}onDismiss();setTimeout(()=>processAlertQueue(onDismiss&&((n)=>{})),600);};return(<div onClick={isAlert?handleDismiss:undefined} style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:bg,color:col,padding:isAlert?"16px 20px":"10px 20px",borderRadius:14,fontWeight:700,fontSize:isAlert?16:14,zIndex:200,border:"2px solid "+bor,maxWidth:"88vw",textAlign:"center",boxShadow:isAlert?"0 4px 24px rgba(251,191,36,0.3)":"none",cursor:isAlert?"pointer":"default",lineHeight:1.5}}>{data.msg}{isAlert&&<div style={{fontSize:11,color:col,opacity:0.6,marginTop:6}}>toca para cerrar</div>}</div>);}
+function Notification({data,onDismiss}){if(!data)return null;const isAlert=data.type==="pickup"||data.type==="score";const bg=data.type==="error"?"#4a1a1a":isAlert?"#0f2a0f":"#1a3d2a";const col=data.type==="error"?"#f87171":isAlert?"#fbbf24":"#4ade80";const bor=data.type==="error"?"#f87171":isAlert?"#fbbf24":"#4ade80";return(<div onClick={isAlert?onDismiss:undefined} style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:bg,color:col,padding:isAlert?"16px 20px":"10px 20px",borderRadius:14,fontWeight:700,fontSize:isAlert?16:14,zIndex:200,border:"2px solid "+bor,maxWidth:"88vw",textAlign:"center",boxShadow:isAlert?"0 4px 24px rgba(251,191,36,0.25)":"none",cursor:isAlert?"pointer":"default",lineHeight:1.4}}>{data.msg}{isAlert&&<div style={{fontSize:11,color:col,opacity:0.7,marginTop:6}}>toca para cerrar</div>}</div>);}
