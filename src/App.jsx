@@ -37,8 +37,10 @@ function generateTeams(players) {
   return teams.map((m,i)=>({ id:"t"+(i+1), name:["Team Eagle","Team Birdie","Team Par"][i], color:["#1a6b3c","#2563eb","#7c3aed"][i], members:m.map(p=>p.id), avgHcp:m.length?Math.round(m.reduce((s,p)=>s+p.handicap,0)/m.length):0 }));
 }
 
+function playingHcp(hcp){ return Math.min(Math.round(hcp*0.75),36); }
+
 function calcHandicapStrokes(playerHcp,lowestHcp,strokeIndexes,totalHoles) {
-  playerHcp=Math.min(playerHcp,36); lowestHcp=Math.min(lowestHcp,36);
+  playerHcp=playingHcp(playerHcp); lowestHcp=playingHcp(lowestHcp);
   const diff=playerHcp-lowestHcp;
   return strokeIndexes.map(si=>{ let s=Math.floor(diff/totalHoles); if(si<=(diff%totalHoles))s++; return s; });
 }
@@ -57,7 +59,7 @@ function getTotalStats(player,scores,course,allPlayers) {
   let totalGross=0,totalSF=0,holesPlayed=0;
   const ps=scores[player.id]||{};
   for(let h=0;h<course.holes;h++){const g=ps[h];if(g!==null&&g!==undefined&&g!==""){holesPlayed++;totalGross+=parseInt(g);const sf=calcStableford(g,course.pars[h],strokes[h]);if(sf!==null)totalSF+=sf;}}
-  const quota=36-Math.min(player.handicap,36);
+  const quota=36-playingHcp(player.handicap);
   return{totalGross,stableford:totalSF,quota,quotaPos:totalSF-quota,holesPlayed};
 }
 
