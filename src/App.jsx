@@ -266,7 +266,15 @@ function ScorecardScreen({currentPlayer,players,course,scores,updateScore,update
   };
   const sc=(g,par,s)=>{if(g===""||g===null||g===undefined)return"#7a9080";const n=parseInt(g)-s,d=par-n;return d>=2?"#e8c84a":d>=1?"#4ade80":d===0?"#f0ede4":"#f87171";};
   const sl=(p)=>{if(p===null)return"";if(p>=4)return"guila";if(p===3)return"Birdie";if(p===2)return"Par";if(p===1)return"Bogey";return"Sin pts";};
-  return(<div style={S.app}>{syncing&&<SyncBadge/>}<div style={{padding:"1rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}><button onClick={onBack} style={S.btnSm("#2a4030","#8fa898")}> Atrs</button><div style={{textAlign:"center"}}><div style={{fontWeight:700,color:"#e8c84a"}}>{currentPlayer.name}</div><div style={S.muted}>HCP {currentPlayer.handicap}</div></div><div style={{...S.muted,fontSize:13}}>{course.holes}H</div></div><div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:"1rem"}}>{Array.from({length:course.holes},(_,i)=>{const g=myScores[i],played=g!==undefined&&g!=="",c=played?sc(g,course.pars[i],myStrokes[i]):"#2a4030";return(<button key={i} onClick={()=>setScoringHole(i)} style={{minWidth:36,height:36,borderRadius:8,background:scoringHole===i?"#e8c84a":"#1a2e1e",color:scoringHole===i?"#0f1f14":c,border:played?"1px solid "+c:"1px solid #2a4030",fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0}}>{i+1}</button>);})}</div><div style={{...S.cardGold,marginBottom:"1rem",textAlign:"center"}}><div style={{fontSize:13,color:"#8fa898",marginBottom:4}}>HOYO {scoringHole+1}</div><div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:8}}><div><div style={S.muted}>Par</div><div style={{fontSize:22,fontWeight:700}}>{par}</div></div><div><div style={S.muted}>SI</div><div style={{fontSize:22,fontWeight:700}}>{course.strokeIndex[scoringHole]}</div></div><div><div style={S.muted}>Golpes</div><div style={{fontSize:22,fontWeight:700,color:"#e8c84a"}}>{stroke>0?"+"+stroke:"0"}</div></div></div><div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:8}}><button onClick={()=>{const v=parseInt(cv)||par;updateScore(currentPlayer.id,scoringHole,Math.max(1,v-1));}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}></button><div style={{fontSize:56,fontWeight:800,color:sc(cv,par,stroke),minWidth:64,textAlign:"center"}}>{cv===""?"":cv}</div><button onClick={()=>{const v=parseInt(cv)||(par-1);updateScore(currentPlayer.id,scoringHole,v+1);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}>+</button></div>{sf!==null&&<div style={{background:"#0f1f14",borderRadius:8,padding:"6px 16px",display:"inline-block"}}><span style={{color:"#e8c84a",fontWeight:700}}>{sf} pts</span><span style={{color:"#8fa898",marginLeft:8,fontSize:13}}>{sl(sf)}</span></div>}
+  return(<div style={S.app}>{syncing&&<SyncBadge/>}<div style={{padding:"1rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}><button onClick={onBack} style={S.btnSm("#2a4030","#8fa898")}> Atrs</button><div style={{textAlign:"center"}}><div style={{fontWeight:700,color:"#e8c84a"}}>{currentPlayer.name}</div><div style={S.muted}>HCP {currentPlayer.handicap}</div></div><div style={{...S.muted,fontSize:13}}>{course.holes}H</div></div><div style={{display:"flex",gap:8,marginBottom:"0.75rem"}}>
+      <button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{flex:1,background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:10,padding:"9px 12px",color:scoringHole===0?"#2a4030":"#8fa898",fontWeight:600,fontSize:13,cursor:scoringHole===0?"default":"pointer"}}>Hoyo anterior</button>
+      <button onClick={()=>{
+        const g=myScores[scoringHole];
+        if(g!==undefined&&g!==""){const pts=calcStableford(g,par,stroke);const isPickupVal=parseInt(g)>=getPickupScore(par,stroke);if(!isPickupVal&&pts!==null&&onScoreAlert){onScoreAlert(getScorePhrase(pts,currentPlayer.name),"score");}}
+        if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa!");onBack();}
+      }} style={{flex:1,background:"#1a6b3c",border:"none",borderRadius:10,padding:"9px 12px",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>{scoringHole<course.holes-1?"Siguiente hoyo":"Terminar ronda"}</button>
+    </div>
+    <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:"1rem"}}>{Array.from({length:course.holes},(_,i)=>{const g=myScores[i],played=g!==undefined&&g!=="",c=played?sc(g,course.pars[i],myStrokes[i]):"#2a4030";return(<button key={i} onClick={()=>setScoringHole(i)} style={{minWidth:36,height:36,borderRadius:8,background:scoringHole===i?"#e8c84a":"#1a2e1e",color:scoringHole===i?"#0f1f14":c,border:played?"1px solid "+c:"1px solid #2a4030",fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0}}>{i+1}</button>);})}</div><div style={{...S.cardGold,marginBottom:"1rem",textAlign:"center"}}><div style={{fontSize:13,color:"#8fa898",marginBottom:4}}>HOYO {scoringHole+1}</div><div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:8}}><div><div style={S.muted}>Par</div><div style={{fontSize:22,fontWeight:700}}>{par}</div></div><div><div style={S.muted}>SI</div><div style={{fontSize:22,fontWeight:700}}>{course.strokeIndex[scoringHole]}</div></div><div><div style={S.muted}>Golpes</div><div style={{fontSize:22,fontWeight:700,color:"#e8c84a"}}>{stroke>0?"+"+stroke:"0"}</div></div></div><div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:8}}><button onClick={()=>{const v=parseInt(cv)||par;updateScore(currentPlayer.id,scoringHole,Math.max(1,v-1));}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}></button><div style={{fontSize:56,fontWeight:800,color:sc(cv,par,stroke),minWidth:64,textAlign:"center"}}>{cv===""?"":cv}</div><button onClick={()=>{const v=parseInt(cv)||(par-1);updateScore(currentPlayer.id,scoringHole,v+1);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}>+</button></div>{sf!==null&&<div style={{background:"#0f1f14",borderRadius:8,padding:"6px 16px",display:"inline-block"}}><span style={{color:"#e8c84a",fontWeight:700}}>{sf} pts</span><span style={{color:"#8fa898",marginLeft:8,fontSize:13}}>{sl(sf)}</span></div>}
     <button onClick={()=>{
       const phrase=getPickupPhrase();
       const pickupScore=getPickupScore(par,stroke);
@@ -482,10 +490,71 @@ function getSideRankings(players, scores, course, allPlayers) {
 }
 
 function IndividualLeaderboard({players,scores,course,teams}){
-  const ranked=players.map(p=>{const s=getTotalStats(p,scores,course,players);return{...p,...s,team:teams.find(t=>t.members.includes(p.id))};}).sort((a,b)=>b.quotaPos-a.quotaPos);
-  return(<div>{ranked.map((p,i)=>(<div key={p.id} style={{...S.card,marginBottom:8,display:"flex",alignItems:"center",gap:12,borderLeft:i===0?"3px solid #e8c84a":"1px solid #2a4030"}}><div style={{fontSize:20,fontWeight:800,color:i===0?"#e8c84a":i===1?"#c0c0c0":i===2?"#cd7f32":"#4a6050",minWidth:28,textAlign:"center"}}>{i===0?"":i===1?"":i===2?"":i+1}</div><Avatar player={p} size={38}/><div style={{flex:1}}><div style={{fontWeight:600}}>{p.name}</div><div style={S.muted}>{p.team?.name} - HCP {p.handicap}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:800,fontSize:18,color:p.quotaPos>0?"#4ade80":p.quotaPos<0?"#f87171":"#f0ede4"}}>{p.holesPlayed>0?(p.quotaPos>=0?"+":"")+p.quotaPos:""}</div><div style={S.muted}>{p.stableford}pts - {p.holesPlayed}H</div></div></div>))}<div style={{...S.muted,textAlign:"center",marginTop:8,fontSize:12}}>Ordenado por cuota</div></div>);
+  const ranked=players.map(p=>{
+    const s=getTotalStats(p,scores,course,players);
+    const holes=getHoleScores(p,scores,course,players);
+    const morale=getMorale(holes);
+    const status=getStatus(holes);
+    const achievements=getAchievements(holes);
+    return{...p,...s,team:teams.find(t=>t.members.includes(p.id)),holes,morale,status,achievements};
+  }).sort((a,b)=>b.quotaPos-a.quotaPos);
+  const sideRankings=getSideRankings(players,scores,course);
+  return(
+    <div>
+      {ranked.map((p,i)=>{
+        const commentary=getCommentary(p.holes,i+1,players.length);
+        return(
+        <div key={p.id} style={{...S.card,marginBottom:10,borderLeft:i===0?"3px solid #e8c84a":"1px solid #2a4030"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{fontSize:16,fontWeight:800,color:i===0?"#e8c84a":i===1?"#9ca3af":i===2?"#92400e":"#374151",minWidth:26,textAlign:"center"}}>{i+1}</div>
+            <Avatar player={p} size={34}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                <span style={{fontWeight:700,fontSize:14}}>{p.name}</span>
+                <span style={{fontSize:9,color:p.morale.color,background:p.morale.color+'15',padding:"1px 6px",borderRadius:20,fontWeight:600,letterSpacing:0.4,whiteSpace:"nowrap"}}>{p.status}</span>
+              </div>
+              <div style={{fontSize:11,color:"#4a6050"}}>{p.team?.name} - HCP {p.handicap}</div>
+            </div>
+            <div style={{textAlign:"right",flexShrink:0}}>
+              <div style={{fontWeight:800,fontSize:17,color:p.quotaPos>0?"#4ade80":p.quotaPos<0?"#f87171":"#f0ede4"}}>{p.holesPlayed>0?(p.quotaPos>=0?"+":"")+p.quotaPos:"-"}</div>
+              <div style={{fontSize:11,color:"#4a6050"}}>{p.stableford}pts</div>
+            </div>
+          </div>
+          {p.holes.length>0&&(
+            <div style={{marginTop:7,paddingTop:7,borderTop:"1px solid #0f1f14"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
+                <span style={{fontSize:9,color:"#374151",textTransform:"uppercase",letterSpacing:1}}>Morale</span>
+                <span style={{fontSize:9,color:p.morale.color,fontWeight:600}}>{p.morale.label}</span>
+              </div>
+              <div style={{height:2,background:"#0f1f14",borderRadius:1}}>
+                <div style={{height:"100%",width:Math.max(4,100-Math.max(0,p.morale.level)*16)+'%',background:p.morale.color,borderRadius:1,transition:"width 1s ease"}}/>
+              </div>
+            </div>
+          )}
+          {commentary&&<div style={{marginTop:6,fontSize:11,color:"#374151",fontStyle:"italic",lineHeight:1.5}}>{commentary}</div>}
+          {p.achievements.length>0&&(
+            <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:3}}>
+              {p.achievements.map(a=><span key={a} style={{fontSize:9,color:"#4a6050",background:"#0f1f14",padding:"2px 7px",borderRadius:10,border:"1px solid #1a2e1e",letterSpacing:0.3}}>{a}</span>)}
+            </div>
+          )}
+        </div>
+        );
+      })}
+      {sideRankings.length>0&&(
+        <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid #1a2e1e"}}>
+          <div style={{fontSize:9,color:"#374151",textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>Analysis</div>
+          {sideRankings.map((r,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #0f1f14"}}>
+              <span style={{fontSize:11,color:"#374151"}}>{r.label}</span>
+              <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{r.player}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{fontSize:10,color:"#374151",textAlign:"center",marginTop:12,letterSpacing:0.5}}>Ordenado por cuota</div>
+    </div>
+  );
 }
-
 function TeamLeaderboard({teams,players,scores,course}){
   const ts=teams.map(t=>{const m=t.members.map(id=>players.find(p=>p.id===id)).filter(Boolean);return{...t,totalSF:m.reduce((s,p)=>s+getTotalStats(p,scores,course,players).stableford,0),holesPlayed:m.reduce((s,p)=>s+getTotalStats(p,scores,course,players).holesPlayed,0),members:m};}).sort((a,b)=>b.totalSF-a.totalSF);
   return(<div>{ts.map((t,i)=>(<div key={t.id} style={{...S.card,marginBottom:12,borderLeft:"4px solid "+t.color}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}><div><div style={{fontWeight:700,fontSize:17,color:t.color}}>{i===0?"🏆🏆 ":""}{t.name}</div><div style={S.muted}>{t.holesPlayed} hoyos</div></div><div style={{fontSize:32,fontWeight:800,color:"#e8c84a"}}>{t.totalSF}</div></div>{t.members.map(p=>{const s=getTotalStats(p,scores,course,players);return(<div key={p.id} style={{display:"flex",alignItems:"center",gap:8,paddingTop:8,borderTop:"1px solid #2a4030"}}><Avatar player={p} size={28}/><span style={{fontSize:13,flex:1}}>{p.name}</span><span style={{fontWeight:700,color:"#e8c84a",fontSize:14}}>{s.stableford}pts</span></div>);})}</div>))}</div>);
