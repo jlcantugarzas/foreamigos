@@ -294,6 +294,193 @@ function ScorecardScreen({currentPlayer,players,course,scores,updateScore,update
     }} style={{...S.btn(),flex:1}}>{scoringHole<course.holes-1?"Siguiente ":"Terminar "}</button></div></div></div>);
 }
 
+
+// ── PERSONALITY ENGINE ────────────────────────────────────────────────────────
+
+function getHoleScores(player, scores, course, allPlayers) {
+  const lowestHcp = allPlayers?.length ? Math.min(...allPlayers.map(p=>p.handicap)) : player.handicap;
+  const strokes = calcHandicapStrokes(player.handicap, lowestHcp, course.strokeIndex, course.holes);
+  const ps = scores[player.id] || {};
+  const holes = [];
+  for (let h = 0; h < course.holes; h++) {
+    const g = ps[h];
+    if (g !== undefined && g !== '') {
+      const sf = calcStableford(g, course.pars[h], strokes[h]);
+      const netDiff = parseInt(g) - strokes[h] - course.pars[h];
+      holes.push({ hole: h, gross: parseInt(g), par: course.pars[h], strokes: strokes[h], sf, netDiff });
+    }
+  }
+  return holes;
+}
+
+function getMorale(holes) {
+  if (!holes.length) return { label: 'Calm', level: 0, color: '#6b7280' };
+  const recent = holes.slice(-3);
+  const recentSF = recent.reduce((s,h)=>s+(h.sf||0),0);
+  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
+  const avgSF = totalSF / holes.length;
+  const badRun = recent.filter(h=>h.sf===0).length;
+  const lastSF = holes[holes.length-1]?.sf || 0;
+
+  if (badRun >= 3) return { label: 'Beyond Analytics', level: 6, color: '#7f1d1d' };
+  if (badRun >= 2 && lastSF === 0) return { label: 'Spiraling', level: 5, color: '#991b1b' };
+  if (badRun >= 2) return { label: 'Critical', level: 4, color: '#b91c1c' };
+  if (avgSF < 1.2 && holes.length > 3) return { label: 'Silent', level: 3, color: '#92400e' };
+  if (avgSF < 1.5 && holes.length > 2) return { label: 'Unstable', level: 2, color: '#b45309' };
+  if (recentSF < 3 && holes.length > 2) return { label: 'Irritated', level: 1, color: '#d97706' };
+  if (avgSF >= 2.5) return { label: 'Focused', level: -1, color: '#059669' };
+  return { label: 'Stable', level: 0, color: '#6b7280' };
+}
+
+function getStatus(holes) {
+  if (!holes.length) return 'Warming Up';
+  const recent = holes.slice(-3);
+  const last = holes[holes.length - 1];
+  const recentSF = recent.reduce((s,h)=>s+(h.sf||0),0);
+  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
+  const avgSF = totalSF / holes.length;
+  const streak0 = holes.slice().reverse().findIndex(h=>h.sf>0);
+  const streakGood = holes.slice().reverse().findIndex(h=>h.sf<2);
+
+  if (streak0 >= 3) return 'Mentally Offline';
+  if (streak0 >= 2) return 'Fighting Demons';
+  if (streak0 === 1 && last.sf === 0) return 'Round Deteriorating';
+  if (streakGood < 0 && holes.length > 2) return 'Unexpected Momentum';
+  if (recentSF >= 7) return 'Dangerously Hopeful';
+  if (recentSF >= 5) return 'Unexpected Momentum';
+  if (avgSF < 1 && holes.length > 3) return 'Emotionally Unavailable';
+  if (avgSF < 1.3 && holes.length > 3) return 'Searching for Answers';
+  if (last.sf >= 3) return 'Holding It Together';
+  if (holes.length >= 7 && avgSF < 1.5) return 'One Hole From Collapse';
+  if (holes.length >= 5 && recentSF < 3) return 'Under Pressure';
+  return 'Stable';
+}
+
+function getCommentary(holes, playerName, rank, totalPlayers) {
+  if (!holes.length) return null;
+  const last = holes[holes.length - 1];
+  const prev = holes[holes.length - 2];
+  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
+  const avgSF = totalSF / holes.length;
+  const streak0 = () => { let c=0; for(let i=holes.length-1;i>=0;i--){ if(holes[i].sf===0)c++; else break; } return c; };
+  const streakGood = () => { let c=0; for(let i=holes.length-1;i>=0;i--){ if(holes[i].sf>=2)c++; else break; } return c; };
+  const s0 = streak0(), sG = streakGood();
+  const isLast = rank === totalPlayers;
+  const isFirst = rank === 1;
+  const holesLeft = holes.length;
+
+  // Eagle
+  if (last.sf >= 4) return 'An exceptional outcome. The group adjusts its expectations accordingly.';
+  // Birdie after bad run
+  if (last.sf === 3 && s0 === 0 && prev?.sf === 0) return 'A response. Whether it changes anything remains to be seen.';
+  // Birdie streak
+  if (sG >= 3 && holes[holes.length-3]?.sf >= 3) return 'Temporary Professional Golfer mode engaged.';
+  // Birdie
+  if (last.sf === 3) return 'Progress noted. The round continues to be monitored.';
+  // Triple bogey or worse
+  if (last.netDiff >= 3) return 'Round integrity compromised.';
+  // Double bogey
+  if (last.netDiff === 2) return 'An ambitious decision that did not conclude as planned.';
+  // Consecutive zeros
+  if (s0 >= 3) return 'The situation continues to develop.';
+  if (s0 >= 2) return 'Momentum unavailable at this time.';
+  // Moving to last
+  if (isLast && holesLeft > 3) return 'The leaderboard reflects recent events.';
+  // Losing lead
+  if (!isFirst && prev && totalSF < 3 && holesLeft > 4) return 'Hope lasted approximately two holes.';
+  // Late round pressure
+  if (holesLeft >= 7 && avgSF < 1.5) return 'A difficult stretch for the player.';
+  // Collapse on final holes
+  if (holesLeft >= 7 && last.sf === 0) return 'Late round panic setting in.';
+  // Generic bad
+  if (last.sf === 0) return 'Confidence declining steadily.';
+  // Generic ok
+  if (last.sf === 2) return 'Stability maintained. For now.';
+  // Generic good start going bad
+  if (holesLeft > 5 && avgSF > 2 && last.sf === 0) return 'This round has entered a new phase.';
+  return null;
+}
+
+function getAchievements(holes) {
+  if (holes.length < 2) return [];
+  const achievements = [];
+  const totalSF = holes.reduce((s,h)=>s+(h.sf||0),0);
+  const avgSF = totalSF/holes.length;
+  const front = holes.slice(0,Math.min(5,holes.length));
+  const back = holes.slice(Math.max(0,holes.length-4));
+  const frontAvg = front.reduce((s,h)=>s+(h.sf||0),0)/front.length;
+  const backAvg = back.reduce((s,h)=>s+(h.sf||0),0)/back.length;
+
+  // Collapse
+  const s0 = () => { let c=0; for(let i=holes.length-1;i>=0;i--){ if(holes[i].sf===0)c++; else break; } return c; };
+  if (s0() >= 3) achievements.push('Public Meltdown');
+  // Back from dead
+  for (let i=1;i<holes.length;i++) {
+    if (holes[i-1].netDiff>=3 && holes[i].sf>=3) { achievements.push('Back From the Dead'); break; }
+  }
+  // Hope was a mistake
+  if (holes.length >= 7 && frontAvg >= 2.2 && backAvg < 1.2) achievements.push('Hope Was a Mistake');
+  // Temporary Professional
+  const consGood = holes.reduce((max,_,i)=>{ let c=0;for(let j=i;j<holes.length;j++){if(holes[j].sf>=2)c++;else break;} return Math.max(max,c); },0);
+  if (consGood >= 3) achievements.push('Temporary Professional Golfer');
+  // Character development
+  const earlyBad = holes.slice(0,3).every(h=>h.sf<=1);
+  const latGood = holes.slice(-3).every(h=>h.sf>=2);
+  if (earlyBad && latGood && holes.length>=6) achievements.push('Character Development');
+  // Not technically giving up
+  if (holes.some(h=>h.netDiff>=3) && totalSF > 5) achievements.push('Not Technically Giving Up');
+  // Still mathematically alive
+  if (avgSF < 1.2 && holes.length >= 5 && totalSF > 0) achievements.push('Still Mathematically Alive');
+  // Against all evidence
+  if (holes.length >= 6 && avgSF < 1.5 && holes[holes.length-1].sf >= 3) achievements.push('Against All Evidence');
+  // Strong start difficult finish
+  if (holes.length >= 8 && frontAvg > 2 && backAvg < 1) achievements.push('Strong Start, Difficult Finish');
+  // The rebuild
+  const consBad = holes.reduce((max,_,i)=>{ let c=0;for(let j=i;j<holes.length;j++){if(holes[j].sf===0)c++;else break;} return Math.max(max,c); },0);
+  if (consBad >= 2 && holes[holes.length-1].sf >= 2) achievements.push('The Rebuild');
+
+  return [...new Set(achievements)];
+}
+
+function getSideRankings(players, scores, course, allPlayers) {
+  const data = players.map(p => {
+    const holes = getHoleScores(p, scores, course, allPlayers);
+    if (!holes.length) return null;
+    const sfs = holes.map(h=>h.sf||0);
+    const diffs = sfs.slice(1).map((s,i)=>Math.abs(s-sfs[i]));
+    const volatility = diffs.reduce((a,b)=>a+b,0);
+    const consBad = holes.reduce((max,_,i)=>{ let c=0;for(let j=i;j<holes.length;j++){if(holes[j].sf===0)c++;else break;} return Math.max(max,c); },0);
+    const front = holes.slice(0,Math.min(5,holes.length));
+    const back = holes.slice(Math.max(0,holes.length-4));
+    const frontAvg = front.reduce((s,h)=>s+(h.sf||0),0)/front.length;
+    const backAvg = back.length ? back.reduce((s,h)=>s+(h.sf||0),0)/back.length : null;
+    const worstStreak = consBad;
+    const bestRecovery = () => { for(let i=1;i<holes.length;i++){ if(holes[i-1].netDiff>=2&&holes[i].sf>=3) return true; } return false; };
+    return { p, holes, volatility, consBad, frontAvg, backAvg, worstStreak, bestRecovery: bestRecovery() };
+  }).filter(Boolean);
+
+  if (!data.length) return [];
+  const rankings = [];
+  const byVolatility = [...data].sort((a,b)=>b.volatility-a.volatility);
+  if (byVolatility[0]) rankings.push({ label: 'Most Volatile Round', player: byVolatility[0].p.name });
+  const bestRec = data.filter(d=>d.bestRecovery);
+  if (bestRec.length) rankings.push({ label: 'Best Recovery', player: bestRec[0].p.name });
+  const byCollapseSpeed = [...data].sort((a,b)=>b.consBad-a.consBad);
+  if (byCollapseSpeed[0]?.consBad >= 2) rankings.push({ label: 'Fastest Collapse', player: byCollapseSpeed[0].p.name });
+  const byDamage = [...data].sort((a,b)=>b.worstStreak-a.worstStreak);
+  if (byDamage[0]?.worstStreak >= 2) rankings.push({ label: 'Most Consecutive Damage', player: byDamage[0].p.name });
+  const strongStart = [...data].filter(d=>d.frontAvg>2&&d.backAvg!==null&&d.backAvg<1.5).sort((a,b)=>(b.frontAvg-b.backAvg)-(a.frontAvg-a.backAvg));
+  if (strongStart[0]) rankings.push({ label: 'Strong Start, Difficult Finish', player: strongStart[0].p.name });
+  const latePanic = [...data].filter(d=>d.backAvg!==null&&d.backAvg<1&&d.frontAvg>=1.5);
+  if (latePanic.length) rankings.push({ label: 'Late Round Panic', player: latePanic[0].p.name });
+  const tempGreat = data.filter(d=>{ const c=d.holes.reduce((max,_,i)=>{ let cc=0;for(let j=i;j<d.holes.length;j++){if(d.holes[j].sf>=3)cc++;else break;} return Math.max(max,cc); },0); return c>=2; });
+  if (tempGreat.length) rankings.push({ label: 'Temporary Greatness', player: tempGreat[0].p.name });
+  const mostExpensive = [...data].sort((a,b)=>b.volatility-a.volatility);
+  if (mostExpensive[0]) rankings.push({ label: 'Most Emotionally Expensive Round', player: mostExpensive[0].p.name });
+
+  return rankings;
+}
+
 function IndividualLeaderboard({players,scores,course,teams}){
   const ranked=players.map(p=>{const s=getTotalStats(p,scores,course,players);return{...p,...s,team:teams.find(t=>t.members.includes(p.id))};}).sort((a,b)=>b.quotaPos-a.quotaPos);
   return(<div>{ranked.map((p,i)=>(<div key={p.id} style={{...S.card,marginBottom:8,display:"flex",alignItems:"center",gap:12,borderLeft:i===0?"3px solid #e8c84a":"1px solid #2a4030"}}><div style={{fontSize:20,fontWeight:800,color:i===0?"#e8c84a":i===1?"#c0c0c0":i===2?"#cd7f32":"#4a6050",minWidth:28,textAlign:"center"}}>{i===0?"":i===1?"":i===2?"":i+1}</div><Avatar player={p} size={38}/><div style={{flex:1}}><div style={{fontWeight:600}}>{p.name}</div><div style={S.muted}>{p.team?.name} - HCP {p.handicap}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:800,fontSize:18,color:p.quotaPos>0?"#4ade80":p.quotaPos<0?"#f87171":"#f0ede4"}}>{p.holesPlayed>0?(p.quotaPos>=0?"+":"")+p.quotaPos:""}</div><div style={S.muted}>{p.stableford}pts - {p.holesPlayed}H</div></div></div>))}<div style={{...S.muted,textAlign:"center",marginTop:8,fontSize:12}}>Ordenado por cuota</div></div>);
