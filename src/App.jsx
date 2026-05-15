@@ -1,5 +1,5 @@
 // v1778826170047
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, doc, collection, setDoc, getDoc, onSnapshot, writeBatch, getDocs } from "firebase/firestore";
@@ -39,6 +39,8 @@ function generateTeams(players) {
   return teams.map((m,i)=>({ id:"t"+(i+1), name:["Team Eagle","Team Birdie","Team Par"][i], color:["#1a6b3c","#2563eb","#7c3aed"][i], members:m.map(p=>p.id), avgHcp:m.length?Math.round(m.reduce((s,p)=>s+p.handicap,0)/m.length):0 }));
 }
 
+
+
 function processAlertQueue(setNotification){
   if(!window._alertQueue||!window._alertQueue.length){window._alertPlaying=false;return;}
   window._alertPlaying=true;
@@ -47,6 +49,13 @@ function processAlertQueue(setNotification){
   setTimeout(()=>{setNotification(null);processAlertQueue(setNotification);},3000);
 }
 function getPickupScore(par, strokes){ return par + strokes + 2 + 1; }
+function getScorePhrase(pts,name){
+  if(pts>=4)return name+' hizo Eagle o mejor! 🦅';
+  if(pts===3)return name+' hizo Birdie! 🐦';
+  if(pts===2)return name+' en par ✓';
+  if(pts===1)return name+' con Bogey';
+  return name+' sin puntos 💀';
+}
 
 function playingHcp(hcp){ if(hcp<=18) return hcp; return Math.min(Math.round(hcp*0.75),36); }
 
@@ -105,8 +114,11 @@ export default function App() {
   const [chatMsg,setChatMsg]=useState(null);
   const [chatOpen,setChatOpen]=useState(false);
   const [chatInput,setChatInput]=useState("");
+  const [chatHistory,setChatHistory]=useState([]);
+  const chatHistoryRef=useRef([]);
 
   const showNotif=(msg,type="success")=>{setNotification({msg,type});setTimeout(()=>setNotification(null),2500);};
+  useEffect(()=>{chatHistoryRef.current=chatHistory;},[chatHistory]);
 
   useEffect(()=>{
     const init=async()=>{
@@ -119,6 +131,7 @@ export default function App() {
     init().catch(console.error);
     const u1=onSnapshot(doc(db,"tournament","current"),snap=>{
       if(snap.exists()){const d=snap.data();if(d.players)setPlayers(d.players);if(d.teams)setTeams(d.teams);if(d.course)setCourse(d.course);if(d.closestPin!==undefined)setClosestPin(d.closestPin||{});if(d.longestDrive!==undefined)setLongestDrive(d.longestDrive);
+        if(d.chatHistory)setChatHistory(d.chatHistory);
         if(d.lastChat&&d.lastChat.ts&&d.lastChat.ts!==window._lastChatTs){window._lastChatTs=d.lastChat.ts;setChatMsg(d.lastChat);}
         if(d.lastPickup&&d.lastPickup.ts&&d.lastPickup.ts!==window._lastPickupTs){
           window._lastPickupTs=d.lastPickup.ts;
@@ -142,12 +155,13 @@ export default function App() {
     try{await setDoc(doc(db,"tournament","current"),data,{merge:true});}catch(e){showNotif("Sync error","error");}finally{setSyncing(false);}
   },[]);
 
-  const sendChat=useCallback(async(text,name)=>{
-    const msg={name,text,ts:Date.now()};
+  const sendChat=useCallback(async(text,name,type="chat")=>{
+    const msg={name,text,ts:Date.now(),type};
+    const newHistory=[...chatHistoryRef.current,msg].slice(-30);
+    setChatHistory(newHistory);
     setChatMsg(msg);
-    setChatInput("");
-    setChatOpen(false);
-    await updateTournament({lastChat:msg});
+    if(type==="chat"){setChatInput("");setChatOpen(false);}
+    await updateTournament({lastChat:msg,chatHistory:newHistory});
   },[updateTournament]);
 
   const getTeam=(pid)=>teams.find(t=>t.members.includes(pid));
@@ -160,12 +174,12 @@ export default function App() {
   if(screen==="home"&&currentPlayer){
     const team=getTeam(currentPlayer.id);
     const stats=getTotalStats(currentPlayer,scores,course,players);
-    return(<div style={S.app}><Notification data={notification} onDismiss={()=>setNotification(null)}/>{syncing&&<SyncBadge/>}<div style={{padding:"1.5rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}><div><div style={S.h1}>{course.name}</div><div style={{...S.muted,display:"flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/>Live</div></div><button onClick={()=>{setCurrentPlayer(null);setScreen("login");}} style={S.btnSm("#2a4030","#7a9080")}>Logout</button></div><div style={{...S.cardGold,marginBottom:"1rem",display:"flex",gap:12,alignItems:"center"}}><Avatar player={currentPlayer} size={52}/><div><div style={{fontSize:20,fontWeight:700,color:"#e8c84a"}}>Bienvenido, {currentPlayer.name}!</div><div style={{color:"#8fa898",fontSize:14}}>{team?.name} - HCP {currentPlayer.handicap}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:"1rem"}}><StatCard label="Stableford" value={stats.stableford} unit="pts"/><StatCard label="Quota" value={(stats.quotaPos>=0?"+":"")+stats.quotaPos} unit={"de "+stats.quota}/><StatCard label="Hoyos" value={stats.holesPlayed+"/"+course.holes} unit="jugados"/><StatCard label="Gross" value={stats.holesPlayed>0?stats.totalGross:""} unit="golpes"/></div><button onClick={()=>setScreen("scorecard")} style={{...S.btn(),marginBottom:"1rem",fontSize:17,padding:16}}>⛳ Ingresar Scores</button><button onClick={()=>setScreen("leaderboard")} style={{...S.btn("#1a2e1e","#e8c84a"),marginBottom:"1rem",border:"1px solid #b8962e"}}>🏆🏆 Leaderboard en Vivo</button><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:12}}>Premios Especiales</div><SpecialAwards players={players} closestPin={closestPin} longestDrive={longestDrive} setClosestPin={cp=>{setClosestPin(cp);updateTournament({closestPin:cp});}} setLongestDrive={ld=>{setLongestDrive(ld);updateTournament({longestDrive:ld});}} currentPlayer={currentPlayer} course={course} showNotif={showNotif}/></div></div><ChatBanner msg={chatMsg}/><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput}/><ChatBanner msg={chatMsg}/><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput}/><BottomNav screen="home" setScreen={setScreen}/></div>);
+    return(<div style={S.app}><Notification data={notification} onDismiss={()=>setNotification(null)}/>{syncing&&<SyncBadge/>}<div style={{padding:"1.5rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}><div><div style={S.h1}>{course.name}</div><div style={{...S.muted,display:"flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/>Live</div></div><button onClick={()=>{setCurrentPlayer(null);setScreen("login");}} style={S.btnSm("#2a4030","#7a9080")}>Logout</button></div><div style={{...S.cardGold,marginBottom:"1rem",display:"flex",gap:12,alignItems:"center"}}><Avatar player={currentPlayer} size={52}/><div><div style={{fontSize:20,fontWeight:700,color:"#e8c84a"}}>Bienvenido, {currentPlayer.name}!</div><div style={{color:"#8fa898",fontSize:14}}>{team?.name} - HCP {currentPlayer.handicap}</div></div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:"1rem"}}><StatCard label="Stableford" value={stats.stableford} unit="pts"/><StatCard label="Quota" value={(stats.quotaPos>=0?"+":"")+stats.quotaPos} unit={"de "+stats.quota}/><StatCard label="Hoyos" value={stats.holesPlayed+"/"+course.holes} unit="jugados"/><StatCard label="Gross" value={stats.holesPlayed>0?stats.totalGross:""} unit="golpes"/></div><button onClick={()=>setScreen("scorecard")} style={{...S.btn(),marginBottom:"1rem",fontSize:17,padding:16}}>⛳ Ingresar Scores</button><button onClick={()=>setScreen("leaderboard")} style={{...S.btn("#1a2e1e","#e8c84a"),marginBottom:"1rem",border:"1px solid #b8962e"}}>🏆🏆 Leaderboard en Vivo</button><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:12}}>Premios Especiales</div><SpecialAwards players={players} closestPin={closestPin} longestDrive={longestDrive} setClosestPin={cp=>{setClosestPin(cp);updateTournament({closestPin:cp});}} setLongestDrive={ld=>{setLongestDrive(ld);updateTournament({longestDrive:ld});}} currentPlayer={currentPlayer} course={course} showNotif={showNotif} sendChat={sendChat}/></div></div><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput} chatHistory={chatHistory}/><BottomNav screen="home" setScreen={setScreen}/></div>);
   }
 
-  if(screen==="scorecard"&&currentPlayer)return <ScorecardScreen currentPlayer={currentPlayer} players={players} course={course} scores={scores} updateScore={updateScore} updateTournament={updateTournament} scoringHole={scoringHole} setScoringHole={setScoringHole} onBack={()=>setScreen("home")} showNotif={showNotif} syncing={syncing} setScreen={setScreen} chatMsg={chatMsg} chatOpen={chatOpen} setChatOpen={setChatOpen} chatInput={chatInput} setChatInput={setChatInput} sendChat={sendChat} setScreen={setScreen} onScoreAlert={(msg)=>{updateTournament({lastPickup:{playerName:'',phrase:msg,hole:0,ts:Date.now()}});setNotification({msg,type:"score"});}} />;
+  if(screen==="scorecard"&&currentPlayer)return <ScorecardScreen currentPlayer={currentPlayer} players={players} course={course} scores={scores} updateScore={updateScore} updateTournament={updateTournament} scoringHole={scoringHole} setScoringHole={setScoringHole} onBack={()=>setScreen("home")} showNotif={showNotif} syncing={syncing} setScreen={setScreen} chatMsg={chatMsg} chatOpen={chatOpen} setChatOpen={setChatOpen} chatInput={chatInput} setChatInput={setChatInput} sendChat={sendChat} onScoreAlert={(msg)=>{updateTournament({lastPickup:{playerName:'',phrase:msg,hole:0,ts:Date.now()}});setNotification({msg,type:"score"});}} />;
 
-  if(screen==="leaderboard")return(<div style={S.app}><Notification data={notification} onDismiss={()=>setNotification(null)}/>{syncing&&<SyncBadge/>}<div style={{padding:"1.5rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}><div style={S.h1}>Leaderboard</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/><span style={{...S.muted,fontSize:11}}>LIVE</span><button onClick={()=>setScreen("home")} style={S.btnSm("#2a4030","#7a9080")}>Atrs</button></div></div><div style={{display:"flex",gap:8,background:"#0f1f14",borderRadius:12,padding:4,marginBottom:"1rem"}}>{["individual","teams","scorecard"].map(t=>(<button key={t} style={S.tab(activeTab===t)} onClick={()=>setActiveTab(t)}>{t==="individual"?"Individual":t==="teams"?"Equipos":"Scorecard"}</button>))}</div>{activeTab==="individual"&&<IndividualLeaderboard players={players} scores={scores} course={course} teams={teams}/>}{activeTab==="teams"&&<TeamLeaderboard teams={teams} players={players} scores={scores} course={course}/>}{activeTab==="scorecard"&&<FullScorecard players={players} scores={scores} course={course} currentPlayer={currentPlayer}/>}</div><ChatBanner msg={chatMsg}/><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput}/><BottomNav screen="leaderboard" setScreen={setScreen}/></div>);
+  if(screen==="leaderboard")return(<div style={S.app}><Notification data={notification} onDismiss={()=>setNotification(null)}/>{syncing&&<SyncBadge/>}<div style={{padding:"1.5rem 1rem 5rem"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}><div style={S.h1}>Leaderboard</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/><span style={{...S.muted,fontSize:11}}>LIVE</span><button onClick={()=>setScreen("home")} style={S.btnSm("#2a4030","#7a9080")}>Atrs</button></div></div><div style={{display:"flex",gap:8,background:"#0f1f14",borderRadius:12,padding:4,marginBottom:"1rem"}}>{["individual","teams","scorecard"].map(t=>(<button key={t} style={S.tab(activeTab===t)} onClick={()=>setActiveTab(t)}>{t==="individual"?"Individual":t==="teams"?"Equipos":"Scorecard"}</button>))}</div>{activeTab==="individual"&&<IndividualLeaderboard players={players} scores={scores} course={course} teams={teams}/>}{activeTab==="teams"&&<TeamLeaderboard teams={teams} players={players} scores={scores} course={course}/>}{activeTab==="scorecard"&&<FullScorecard players={players} scores={scores} course={course} currentPlayer={currentPlayer}/>}</div><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput} chatHistory={chatHistory}/><BottomNav screen="leaderboard" setScreen={setScreen}/></div>);
 
   return null;
 }
@@ -219,6 +233,7 @@ function ScorecardScreen({currentPlayer,players,course,scores,updateScore,update
     if(isPickupVal)return;
     const phrase=getScorePhrase(pts,currentPlayer.name);
     if(onScoreAlert)onScoreAlert(phrase);
+    sendChat(phrase,currentPlayer.name,"event");
   };
   const sc=(g,par,s)=>{if(g===""||g===null||g===undefined)return"#7a9080";const n=parseInt(g)-s,d=par-n;return d>=2?"#e8c84a":d>=1?"#4ade80":d===0?"#f0ede4":"#f87171";};
   const sl=(p)=>{if(p===null)return"";if(p>=4)return"guila";if(p===3)return"Birdie";if(p===2)return"Par";if(p===1)return"Bogey";return"Sin pts";};
@@ -227,8 +242,8 @@ function ScorecardScreen({currentPlayer,players,course,scores,updateScore,update
       <button onClick={()=>{const g=myScores[scoringHole];if(g!==undefined&&g!==""){const pts=calcStableford(g,par,stroke);const isP=parseInt(g)>=getPickupScore(par,stroke);if(!isP&&pts!==null&&onScoreAlert)onScoreAlert(getScorePhrase(pts,currentPlayer.name),"score");}if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa!");onBack();}}} style={{flex:1,background:"#1a6b3c",border:"none",borderRadius:10,padding:"9px",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>{scoringHole<course.holes-1?"Siguiente hoyo":"Terminar ronda"}</button>
     </div>
     <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:"1rem"}}>{Array.from({length:course.holes},(_,i)=>{const g=myScores[i],played=g!==undefined&&g!=="",c=played?sc(g,course.pars[i],myStrokes[i]):"#2a4030";return(<button key={i} onClick={()=>setScoringHole(i)} style={{minWidth:36,height:36,borderRadius:8,background:scoringHole===i?"#e8c84a":"#1a2e1e",color:scoringHole===i?"#0f1f14":c,border:played?"1px solid "+c:"1px solid #2a4030",fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0}}>{i+1}</button>);})}</div><div style={{...S.cardGold,marginBottom:"1rem",textAlign:"center"}}><div style={{fontSize:13,color:"#8fa898",marginBottom:4}}>HOYO {scoringHole+1}</div><div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:8}}><div><div style={S.muted}>Par</div><div style={{fontSize:22,fontWeight:700}}>{par}</div></div><div><div style={S.muted}>SI</div><div style={{fontSize:22,fontWeight:700}}>{course.strokeIndex[scoringHole]}</div></div><div><div style={S.muted}>Golpes</div><div style={{fontSize:22,fontWeight:700,color:"#e8c84a"}}>{stroke>0?"+"+stroke:"0"}</div></div></div><div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:8}}><button onClick={()=>{const v=parseInt(cv)||par;const ns=Math.max(1,v-1);updateScore(currentPlayer.id,scoringHole,ns);fireScorePhrase(ns,scoringHole);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}></button><div style={{fontSize:56,fontWeight:800,color:sc(cv,par,stroke),minWidth:64,textAlign:"center"}}>{cv===""?"":cv}</div><button onClick={()=>{const v=parseInt(cv)||(par-1);const ns=v+1;updateScore(currentPlayer.id,scoringHole,ns);fireScorePhrase(ns,scoringHole);}} style={{width:52,height:52,borderRadius:26,background:"#2a4030",border:"none",color:"#f0ede4",fontSize:24,cursor:"pointer",fontWeight:700}}>+</button></div>{sf!==null&&<div style={{background:"#0f1f14",borderRadius:8,padding:"6px 16px",display:"inline-block"}}><span style={{color:"#e8c84a",fontWeight:700}}>{sf} pts</span><span style={{color:"#8fa898",marginLeft:8,fontSize:13}}>{sl(sf)}</span></div>}
-    <button onClick={()=>{const ps=getPickupScore(par,stroke);updateScore(currentPlayer.id,scoringHole,ps);const msg=currentPlayer.name+" recogió su pelota 🏳️‍🌈";const al={msg,type:"pickup",ts:Date.now()};if(!window._seenAlerts)window._seenAlerts=new Set();window._seenAlerts.add(al.ts);if(!window._alertQueue)window._alertQueue=[];window._alertQueue.unshift(al);if(!window._alertPlaying)processAlertQueue(setNotification);updateTournament({lastAlert:{msg,type:"pickup",ts:al.ts}});}} style={{background:"#3d2000",color:"#fbbf24",border:"1px solid #fbbf24",borderRadius:10,padding:"10px 16px",fontWeight:700,fontSize:13,cursor:"pointer",marginTop:10,width:"100%"}}>Recoger pelota</button>
-    <div style={{display:"flex",gap:8,marginTop:12}}>{[par-1,par,par+1,par+2].map(v=>(<button key={v} onClick={()=>{updateScore(currentPlayer.id,scoringHole,v);fireScorePhrase(v,scoringHole);}} style={{flex:1,padding:"10px 4px",borderRadius:8,background:parseInt(cv)===v?"#1a6b3c":"#1a2e1e",border:"1px solid #2a4030",color:parseInt(cv)===v?"#fff":"#8fa898",fontWeight:600,fontSize:14,cursor:"pointer"}}>{v}</button>))}</div></div><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:8}}>Mi Ronda</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{[{l:"Gross",v:stats.totalGross||""},{l:"SF",v:stats.stableford+"pts"},{l:"Quota",v:(stats.quotaPos>=0?"+":"")+stats.quotaPos}].map(({l,v})=>(<div key={l} style={{background:"#0f1f14",borderRadius:8,padding:8,textAlign:"center"}}><div style={{...S.muted,fontSize:11}}>{l}</div><div style={{fontWeight:700,fontSize:15,color:"#e8c84a"}}>{v}</div></div>))}</div></div><div style={{...S.h3,marginBottom:8}}>Otros</div>{players.filter(p=>p.id!==currentPlayer.id).map(p=>{const ps=scores[p.id]||{},ps2=calcHandicapStrokes(p.handicap,lowestHcp,course.strokeIndex,course.holes),g=ps[scoringHole],psf=calcStableford(g,course.pars[scoringHole],ps2[scoringHole]);return(<div key={p.id} style={{...S.card,marginBottom:8,display:"flex",alignItems:"center",gap:12,opacity:0.8}}><Avatar player={p} size={36}/><div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{p.name}</div><div style={S.muted}> Solo lectura</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:18,color:g?sc(g,course.pars[scoringHole],ps2[scoringHole]):"#2a4030"}}>{g||""}</div>{psf!==null&&<div style={{fontSize:12,color:"#8fa898"}}>{psf}pts</div>}</div></div>);})}<div style={{display:"flex",gap:8,marginTop:"1rem"}}><button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{...S.btn("#1a2e1e","#8fa898"),flex:1}}> Anterior</button><button onClick={()=>{if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa! ");onBack();}}} style={{...S.btn(),flex:1}}>{scoringHole<course.holes-1?"Siguiente ":"Terminar "}</button></div></div><ChatBanner msg={chatMsg}/><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput}/><BottomNav screen="scorecard" setScreen={(s)=>{if(s!=="scorecard")setScreen(s);}}/></div>);
+    <button onClick={()=>{const ps=getPickupScore(par,stroke);updateScore(currentPlayer.id,scoringHole,ps);const msg=currentPlayer.name+" recogió su pelota 🏳️‍🌈";const al={msg,type:"pickup",ts:Date.now()};if(!window._seenAlerts)window._seenAlerts=new Set();window._seenAlerts.add(al.ts);if(!window._alertQueue)window._alertQueue=[];window._alertQueue.unshift(al);if(!window._alertPlaying)processAlertQueue(setNotification);updateTournament({lastAlert:{msg,type:"pickup",ts:al.ts}});sendChat(msg,currentPlayer.name,"event");}} style={{background:"#3d2000",color:"#fbbf24",border:"1px solid #fbbf24",borderRadius:10,padding:"10px 16px",fontWeight:700,fontSize:13,cursor:"pointer",marginTop:10,width:"100%"}}>Recoger pelota</button>
+    <div style={{display:"flex",gap:8,marginTop:12}}>{[par-1,par,par+1,par+2].map(v=>(<button key={v} onClick={()=>{updateScore(currentPlayer.id,scoringHole,v);fireScorePhrase(v,scoringHole);}} style={{flex:1,padding:"10px 4px",borderRadius:8,background:parseInt(cv)===v?"#1a6b3c":"#1a2e1e",border:"1px solid #2a4030",color:parseInt(cv)===v?"#fff":"#8fa898",fontWeight:600,fontSize:14,cursor:"pointer"}}>{v}</button>))}</div></div><div style={{...S.card,marginBottom:"1rem"}}><div style={{...S.h3,marginBottom:8}}>Mi Ronda</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{[{l:"Gross",v:stats.totalGross||""},{l:"SF",v:stats.stableford+"pts"},{l:"Quota",v:(stats.quotaPos>=0?"+":"")+stats.quotaPos}].map(({l,v})=>(<div key={l} style={{background:"#0f1f14",borderRadius:8,padding:8,textAlign:"center"}}><div style={{...S.muted,fontSize:11}}>{l}</div><div style={{fontWeight:700,fontSize:15,color:"#e8c84a"}}>{v}</div></div>))}</div></div><div style={{...S.h3,marginBottom:8}}>Otros</div>{players.filter(p=>p.id!==currentPlayer.id).map(p=>{const ps=scores[p.id]||{},ps2=calcHandicapStrokes(p.handicap,lowestHcp,course.strokeIndex,course.holes),g=ps[scoringHole],psf=calcStableford(g,course.pars[scoringHole],ps2[scoringHole]);return(<div key={p.id} style={{...S.card,marginBottom:8,display:"flex",alignItems:"center",gap:12,opacity:0.8}}><Avatar player={p} size={36}/><div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{p.name}</div><div style={S.muted}> Solo lectura</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:18,color:g?sc(g,course.pars[scoringHole],ps2[scoringHole]):"#2a4030"}}>{g||""}</div>{psf!==null&&<div style={{fontSize:12,color:"#8fa898"}}>{psf}pts</div>}</div></div>);})}<div style={{display:"flex",gap:8,marginTop:"1rem"}}><button onClick={()=>setScoringHole(h=>Math.max(0,h-1))} disabled={scoringHole===0} style={{...S.btn("#1a2e1e","#8fa898"),flex:1}}> Anterior</button><button onClick={()=>{if(scoringHole<course.holes-1)setScoringHole(h=>h+1);else{showNotif("Ronda completa! ");onBack();}}} style={{...S.btn(),flex:1}}>{scoringHole<course.holes-1?"Siguiente ":"Terminar "}</button></div></div><ChatInput player={currentPlayer} onSend={sendChat} open={chatOpen} setOpen={setChatOpen} value={chatInput} setValue={setChatInput} chatHistory={chatHistory}/><BottomNav screen="scorecard" setScreen={(s)=>{if(s!=="scorecard")setScreen(s);}}/></div>);
 }
 
 
@@ -412,48 +427,85 @@ function FullScorecard({players,scores,course,currentPlayer}){
   return(<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:400}}><thead><tr style={{borderBottom:"1px solid #2a4030"}}><th style={{color:"#8fa898",padding:"6px 4px",textAlign:"left"}}>Jugador</th>{Array.from({length:course.holes},(_,i)=><th key={i} style={{color:"#8fa898",padding:"4px 2px",textAlign:"center",minWidth:22}}>{i+1}</th>)}<th style={{color:"#e8c84a",padding:"4px 6px",textAlign:"center"}}>SF</th></tr></thead><tbody>{players.map(p=>{const ps=scores[p.id]||{},st=calcHandicapStrokes(p.handicap,lh,course.strokeIndex,course.holes);let t=0;return(<tr key={p.id} style={{borderBottom:"1px solid #1a2e1e",background:currentPlayer?.id===p.id?"#1a2e1e":"transparent"}}><td style={{padding:"6px 4px",fontWeight:600,fontSize:12,color:currentPlayer?.id===p.id?"#e8c84a":"#f0ede4"}}>{p.name.slice(0,6)}</td>{Array.from({length:course.holes},(_,i)=>{const g=ps[i],sf=calcStableford(g,course.pars[i],st[i]);if(sf!==null)t+=sf;const bg=g?parseInt(g)<=course.pars[i]-st[i]-1?"#e8c84a":parseInt(g)<=course.pars[i]-st[i]?"#1a6b3c":parseInt(g)<=course.pars[i]-st[i]+1?"#1a2e1e":"#3a1a1a":"transparent";return<td key={i} style={{textAlign:"center",padding:"4px 2px",background:bg,borderRadius:4,color:g?"#fff":"#2a4030"}}>{g||"-"}</td>;})}<td style={{textAlign:"center",fontWeight:700,color:"#e8c84a",padding:"4px 6px"}}>{t}</td></tr>);})}</tbody></table></div>);
 }
 
-function SpecialAwards({players,closestPin,longestDrive,setClosestPin,setLongestDrive,currentPlayer,course,showNotif}){
+function SpecialAwards({players,closestPin,longestDrive,setClosestPin,setLongestDrive,currentPlayer,course,showNotif,sendChat}){
   const [cpH,setCpH]=useState(1);
   const cp=players.find(p=>p.id===closestPin[cpH]),ld=players.find(p=>p.id===longestDrive);
-  return(<div style={{display:"flex",flexDirection:"column",gap:10}}><div style={{background:"#0f1f14",borderRadius:10,padding:12}}><div style={{fontWeight:600,color:"#e8c84a",marginBottom:8}}> Ms Cerca</div><select value={cpH} onChange={e=>setCpH(parseInt(e.target.value))} style={{...S.input,width:"auto",marginBottom:8}}>{Array.from({length:course.holes},(_,i)=><option key={i} value={i+1}>Hoyo {i+1}</option>)}</select>{cp?<div style={{...S.muted,marginBottom:6}}>Actual: <span style={{color:"#4ade80",fontWeight:600}}>{cp.name}</span></div>:<div style={{...S.muted,marginBottom:6}}>Sin reclamar</div>}<button onClick={()=>{const c={...closestPin,[cpH]:currentPlayer.id};setClosestPin(c);showNotif(currentPlayer.name+" reclama H"+cpH+"! ");}} style={S.btnSm()}>Reclamar H{cpH}</button></div><div style={{background:"#0f1f14",borderRadius:10,padding:12}}><div style={{fontWeight:600,color:"#e8c84a",marginBottom:8}}> Drive Ms Largo</div>{ld?<div style={{...S.muted,marginBottom:6}}>Actual: <span style={{color:"#4ade80",fontWeight:600}}>{ld.name}</span></div>:<div style={{...S.muted,marginBottom:6}}>Sin reclamar</div>}<button onClick={()=>{setLongestDrive(currentPlayer.id);showNotif(currentPlayer.name+" reclama LD! ");}} style={S.btnSm()}>Reclamar</button></div></div>);
+  return(<div style={{display:"flex",flexDirection:"column",gap:10}}><div style={{background:"#0f1f14",borderRadius:10,padding:12}}><div style={{fontWeight:600,color:"#e8c84a",marginBottom:8}}> Ms Cerca</div><select value={cpH} onChange={e=>setCpH(parseInt(e.target.value))} style={{...S.input,width:"auto",marginBottom:8}}>{Array.from({length:course.holes},(_,i)=><option key={i} value={i+1}>Hoyo {i+1}</option>)}</select>{cp?<div style={{...S.muted,marginBottom:6}}>Actual: <span style={{color:"#4ade80",fontWeight:600}}>{cp.name}</span></div>:<div style={{...S.muted,marginBottom:6}}>Sin reclamar</div>}<button onClick={()=>{const c={...closestPin,[cpH]:currentPlayer.id};setClosestPin(c);showNotif(currentPlayer.name+" reclama H"+cpH+"! ");if(sendChat)sendChat(currentPlayer.name+' reclama más cerca en H'+cpH+' 📍',currentPlayer.name,'event');}} style={S.btnSm()}>Reclamar H{cpH}</button></div><div style={{background:"#0f1f14",borderRadius:10,padding:12}}><div style={{fontWeight:600,color:"#e8c84a",marginBottom:8}}> Drive Ms Largo</div>{ld?<div style={{...S.muted,marginBottom:6}}>Actual: <span style={{color:"#4ade80",fontWeight:600}}>{ld.name}</span></div>:<div style={{...S.muted,marginBottom:6}}>Sin reclamar</div>}<button onClick={()=>{setLongestDrive(currentPlayer.id);showNotif(currentPlayer.name+" reclama LD! ");if(sendChat)sendChat(currentPlayer.name+' reclama el drive más largo 💪',currentPlayer.name,'event');}} style={S.btnSm()}>Reclamar</button></div></div>);
 }
 
 function Avatar({player,size=40}){return(<div style={{width:size,height:size,borderRadius:"50%",background:player.color||"#1a6b3c",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:size*0.35,color:"#fff",flexShrink:0}}>{player.initials||player.name?.slice(0,2).toUpperCase()}</div>);}
 function StatCard({label,value,unit}){return(<div style={{background:"#1a2e1e",borderRadius:12,padding:"14px 12px",textAlign:"center",border:"1px solid #2a4030"}}><div style={{...S.muted,fontSize:11,marginBottom:4}}>{label}</div><div style={{fontSize:22,fontWeight:800,color:"#e8c84a"}}>{value}</div>{unit&&<div style={{...S.muted,fontSize:11}}>{unit}</div>}</div>);}
 
-function ChatBanner({msg}){
-  if(!msg)return null;
-  return(
-    <div style={{position:"fixed",bottom:64,left:0,right:0,zIndex:150,padding:"0 12px",pointerEvents:"none"}}>
-      <div style={{background:"#0f2a1a",border:"1px solid #1a6b3c",borderRadius:12,padding:"8px 14px",display:"flex",gap:8,alignItems:"center",boxShadow:"0 2px 12px rgba(0,0,0,0.4)"}}>
-        <div style={{width:6,height:6,borderRadius:"50%",background:"#4ade80",flexShrink:0}}/>
-        <span style={{fontSize:12,color:"#4ade80",fontWeight:700,flexShrink:0}}>{msg.name}</span>
-        <span style={{fontSize:13,color:"#f0ede4",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{msg.text}</span>
-      </div>
-    </div>
-  );
-}
-
-function ChatInput({player,onSend,open,setOpen,value,setValue}){
+function ChatInput({player,onSend,open,setOpen,value,setValue,chatHistory}){
   if(!player)return null;
+  const QUICK=["Suertudo 🍀","Ay no 😬","Qué milagro ✨","Ya se rompió 💀","Buen tiro 👏","Se acabó 🏴","Otro pickup? 🏳️","Aplausos 👏👏"];
+  const bottomRef=useRef(null);
+  const lastChat=(chatHistory||[]).filter(m=>m.type!=="event").slice(-1)[0];
+  useEffect(()=>{if(open)setTimeout(()=>bottomRef.current?.scrollIntoView({behavior:"instant"}),50);},[open,chatHistory?.length]);
   return(
-    <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:140,padding:"0 12px"}}>
-      {open?(
-        <div style={{background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:12,padding:"8px 10px",display:"flex",gap:8,alignItems:"center"}}>
-          <input autoFocus value={value} onChange={e=>setValue(e.target.value.slice(0,80))} onKeyDown={e=>{if(e.key==="Enter"&&value.trim()){onSend(value,player.name);e.preventDefault();}if(e.key==="Escape")setOpen(false);}} placeholder="Di algo al grupo..." style={{flex:1,background:"transparent",border:"none",color:"#f0ede4",fontSize:14,outline:"none"}}/>
-          <span style={{fontSize:10,color:"#4a6050",flexShrink:0}}>{value.length}/80</span>
-          <button onClick={()=>{if(value.trim())onSend(value,player.name);}} style={{background:"#1a6b3c",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer",flexShrink:0}}>Enviar</button>
-          <button onClick={()=>setOpen(false)} style={{background:"transparent",border:"none",color:"#4a6050",fontSize:16,cursor:"pointer",flexShrink:0,lineHeight:1}}>x</button>
+    <>
+      {open&&(
+        <div style={{position:"fixed",inset:0,zIndex:500,background:"#0f1f14",display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"1rem 1rem 0.75rem",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #1a2e1e",flexShrink:0}}>
+            <div style={S.h1}>Chat 💬</div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{width:7,height:7,borderRadius:"50%",background:"#4ade80",display:"inline-block"}}/>
+              <span style={{...S.muted,fontSize:11}}>LIVE</span>
+              <button onClick={()=>setOpen(false)} style={{background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:8,padding:"7px 14px",color:"#8fa898",fontWeight:600,fontSize:13,cursor:"pointer"}}>Cerrar</button>
+            </div>
+          </div>
+          <div style={{padding:"8px 12px",display:"flex",gap:6,overflowX:"auto",borderBottom:"1px solid #1a2e1e",flexShrink:0}}>
+            {QUICK.map(q=>(
+              <button key={q} onClick={()=>onSend(q,player.name)} style={{background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:20,padding:"7px 13px",color:"#c8d9c0",fontSize:13,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{q}</button>
+            ))}
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"12px 12px 0.5rem",display:"flex",flexDirection:"column",gap:6}}>
+            {(chatHistory||[]).length===0&&<div style={{textAlign:"center",color:"#4a6050",marginTop:40,fontSize:14}}>Sin mensajes. Empieza el trash talk.</div>}
+            {(chatHistory||[]).map((msg,i)=>{
+              const isMe=msg.name===player?.name;
+              const isEvent=msg.type==="event";
+              if(isEvent)return(
+                <div key={msg.ts+""+i} style={{textAlign:"center",padding:"2px 0"}}>
+                  <span style={{fontSize:11,color:"#4a6050",background:"#0a1a0d",padding:"3px 10px",borderRadius:20,border:"1px solid #1a2e1e",display:"inline-block"}}>{msg.text}</span>
+                </div>
+              );
+              return(
+                <div key={msg.ts+""+i} style={{display:"flex",flexDirection:"column",alignItems:isMe?"flex-end":"flex-start"}}>
+                  {!isMe&&<span style={{fontSize:10,color:"#4a6050",marginBottom:2,marginLeft:6}}>{msg.name}</span>}
+                  <div style={{background:isMe?"#1a6b3c":"#1a2e1e",borderRadius:isMe?"12px 12px 2px 12px":"12px 12px 12px 2px",padding:"9px 13px",maxWidth:"78%",fontSize:14,color:"#f0ede4",border:"1px solid "+(isMe?"#2a8a4a":"#2a4030")}}>{msg.text}</div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef}/>
+          </div>
+          <div style={{padding:"10px 12px 16px",background:"#0a1a0d",borderTop:"1px solid #1a2e1e",flexShrink:0}}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input autoFocus value={value} onChange={e=>setValue(e.target.value.slice(0,80))} onKeyDown={e=>{if(e.key==="Enter"&&value.trim()){onSend(value,player.name);e.preventDefault();}if(e.key==="Escape")setOpen(false);}} placeholder="Escribe tu trash talk..." style={{...S.input,flex:1,fontSize:15}}/>
+              <span style={{fontSize:10,color:"#4a6050",flexShrink:0}}>{value.length}/80</span>
+              <button onClick={()=>{if(value.trim())onSend(value,player.name);}} style={{...S.btnSm(),flexShrink:0,padding:"13px 18px",fontSize:14}}>Enviar</button>
+            </div>
+          </div>
         </div>
-      ):(
-        <button onClick={()=>setOpen(true)} style={{width:"100%",background:"#1a2e1e",border:"1px solid #2a4030",borderRadius:12,padding:"8px 14px",color:"#4a6050",fontSize:13,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
-          <div style={{width:6,height:6,borderRadius:"50%",background:"#2a4030",flexShrink:0}}/>
-          <span>Di algo al grupo...</span>
-        </button>
       )}
-    </div>
+      <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:140,padding:"0 10px"}}>
+        <button onClick={()=>setOpen(true)} style={{width:"100%",background:"#0f2a1a",border:"2px solid #1a6b3c",borderRadius:14,padding:"11px 16px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12,boxShadow:"0 2px 12px rgba(26,107,60,0.25)"}}>
+          <div style={{fontSize:22,flexShrink:0}}>💬</div>
+          <div style={{flex:1,minWidth:0}}>
+            {lastChat?(
+              <>
+                <div style={{fontSize:11,color:"#4ade80",fontWeight:700,marginBottom:1}}>{lastChat.name}</div>
+                <div style={{fontSize:13,color:"#c8d9c0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lastChat.text}</div>
+              </>
+            ):(
+              <div style={{fontSize:14,color:"#4ade80",fontWeight:600}}>Trash talk al grupo...</div>
+            )}
+          </div>
+          <div style={{flexShrink:0,background:"#1a6b3c",borderRadius:10,padding:"6px 14px",color:"#fff",fontSize:12,fontWeight:700}}>Abrir</div>
+        </button>
+      </div>
+    </>
   );
 }
 
-function BottomNav({screen,setScreen}){return(<div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a1a0d",borderTop:"1px solid #2a4030",display:"flex",padding:"8px 0 12px",zIndex:100}}>{[{id:"home",icon:"",label:"Inicio"},{id:"scorecard",icon:"⛳",label:"Score"},{id:"leaderboard",icon:"🏆🏆",label:"Board"}].map(it=>(<button key={it.id} onClick={()=>setScreen(it.id)} style={{flex:1,background:"none",border:"none",color:screen===it.id?"#e8c84a":"#4a6050",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><div style={{fontSize:20}}>{it.icon}</div><div style={{fontSize:11,fontWeight:600}}>{it.label}</div></button>))}</div>);}
+function BottomNav({screen,setScreen}){return(<div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a1a0d",borderTop:"1px solid #2a4030",display:"flex",padding:"8px 0 12px",zIndex:100}}>{[{id:"home",icon:"",label:"Inicio"},{id:"scorecard",icon:"⛳",label:"Score"},{id:"leaderboard",icon:"🏆",label:"Board"}].map(it=>(<button key={it.id} onClick={()=>setScreen(it.id)} style={{flex:1,background:"none",border:"none",color:screen===it.id?"#e8c84a":"#4a6050",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><div style={{fontSize:20}}>{it.icon}</div><div style={{fontSize:11,fontWeight:600}}>{it.label}</div></button>))}</div>);}
 function Notification({data,onDismiss}){if(!data)return null;const isAlert=data.type==="pickup"||data.type==="score";const bg=data.type==="error"?"#4a1a1a":isAlert?"#0f2a0f":"#1a3d2a";const col=data.type==="error"?"#f87171":isAlert?"#fbbf24":"#4ade80";const bor=data.type==="error"?"#f87171":isAlert?"#fbbf24":"#4ade80";return(<div onClick={isAlert?onDismiss:undefined} style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:bg,color:col,padding:isAlert?"16px 20px":"10px 20px",borderRadius:14,fontWeight:700,fontSize:isAlert?16:14,zIndex:200,border:"2px solid "+bor,maxWidth:"88vw",textAlign:"center",boxShadow:isAlert?"0 4px 24px rgba(251,191,36,0.25)":"none",cursor:isAlert?"pointer":"default",lineHeight:1.4}}>{data.msg}{isAlert&&<div style={{fontSize:11,color:col,opacity:0.7,marginTop:6}}>toca para cerrar</div>}</div>);}
