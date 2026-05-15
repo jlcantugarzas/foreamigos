@@ -1,22 +1,6 @@
 // v1778826170047
 import { useState, useEffect, useCallback } from "react";
 
-  const [chatMsg,setChatMsg]=useState(null);
-  const [chatOpen,setChatOpen]=useState(false);
-  const [chatInput,setChatInput]=useState("");
-
-  const sendChat=(text,name)=>{
-    if(!text||!text.trim())return;
-    const chat={name:name||"?",text:text.trim().slice(0,80),ts:Date.now()};
-    setChatMsg(chat);
-    setChatInput("");
-    setChatOpen(false);
-    if(window._chatTimer)clearTimeout(window._chatTimer);
-    window._chatTimer=setTimeout(()=>setChatMsg(null),4000);
-    if(!window._seenChats)window._seenChats=new Set();
-    window._seenChats.add(chat.ts);
-    updateTournament({lastChat:chat});
-  };
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, doc, collection, setDoc, getDoc, onSnapshot, writeBatch, getDocs } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
