@@ -39,46 +39,13 @@ function generateTeams(players) {
   return teams.map((m,i)=>({ id:"t"+(i+1), name:["Team Eagle","Team Birdie","Team Par"][i], color:["#1a6b3c","#2563eb","#7c3aed"][i], members:m.map(p=>p.id), avgHcp:m.length?Math.round(m.reduce((s,p)=>s+p.handicap,0)/m.length):0 }));
 }
 
-
-const PICKUP_PHRASES = [
-  "Por que Dios mio, POR QUE",
-  "Que me entierren en este hoyo",
-  "Me arrepiento de haber nacido",
-  "Hasta mi sombra me abandono",
-  "Mandenle flores a mi score",
-  "Fue el puto viento",
-  "El sol me deslumbro",
-  "Me aprietan los zapatos",
-  "Un pajaro me distrajo",
-  "El pasto esta raro hoy",
-  "El palo viene chueco de fabrica",
-  "La cancha esta mal disenada",
-  "Vendo mis palos",
-  "Me voy al tenis",
-  "Mejor juego futbol",
-  "El golf no era lo mio",
-  "Me retiro a la playa",
-  "Me pusieron mal el handicap",
-  "Me estaban viendo y me puse nervioso",
-  "Me llego un mensaje y me desconcentre",
-  "Alguien se movio",
-  "Me echaron el mal de ojo",
-  "Ya para que, mejor chelas",
-  "Le pago a alguien que juegue por mi",
-  "Soy oficialmente el peor del grupo",
-  "Ni en el Wii Sports me va tan mal",
-  "Juro que en los tacos soy mejor",
-  "Santa Barbara bendita",
-  "Me voy a confesar despues de esto",
-  "Culpo a mis ancestros",
-  "Chinguen a su madre todos",
-  "El hoyo puede irse a la verga",
-  "Se lo dedico a mi psicologo",
-  "Esta caguama es pa olvidar",
-  "Ya me quiebre como pinata"
-];
-
-function getPickupPhrase(){ return PICKUP_PHRASES[Math.floor(Math.random()*PICKUP_PHRASES.length)]; }
+function processAlertQueue(setNotification){
+  if(!window._alertQueue||!window._alertQueue.length){window._alertPlaying=false;return;}
+  window._alertPlaying=true;
+  const al=window._alertQueue.pop();
+  setNotification({msg:al.msg,type:al.type});
+  setTimeout(()=>{setNotification(null);processAlertQueue(setNotification);},3000);
+}
 function getPickupScore(par, strokes){ return par + strokes + 2 + 1; }
 
 function playingHcp(hcp){ if(hcp<=18) return hcp; return Math.min(Math.round(hcp*0.75),36); }
@@ -152,6 +119,7 @@ export default function App() {
     init().catch(console.error);
     const u1=onSnapshot(doc(db,"tournament","current"),snap=>{
       if(snap.exists()){const d=snap.data();if(d.players)setPlayers(d.players);if(d.teams)setTeams(d.teams);if(d.course)setCourse(d.course);if(d.closestPin!==undefined)setClosestPin(d.closestPin||{});if(d.longestDrive!==undefined)setLongestDrive(d.longestDrive);
+        if(d.lastChat&&d.lastChat.ts&&d.lastChat.ts!==window._lastChatTs){window._lastChatTs=d.lastChat.ts;setChatMsg(d.lastChat);}
         if(d.lastPickup&&d.lastPickup.ts&&d.lastPickup.ts!==window._lastPickupTs){
           window._lastPickupTs=d.lastPickup.ts;
           const isPickupAlert=d.lastPickup.playerName&&d.lastPickup.playerName!=='';
@@ -173,6 +141,14 @@ export default function App() {
     setSyncing(true);
     try{await setDoc(doc(db,"tournament","current"),data,{merge:true});}catch(e){showNotif("Sync error","error");}finally{setSyncing(false);}
   },[]);
+
+  const sendChat=useCallback(async(text,name)=>{
+    const msg={name,text,ts:Date.now()};
+    setChatMsg(msg);
+    setChatInput("");
+    setChatOpen(false);
+    await updateTournament({lastChat:msg});
+  },[updateTournament]);
 
   const getTeam=(pid)=>teams.find(t=>t.members.includes(pid));
 
